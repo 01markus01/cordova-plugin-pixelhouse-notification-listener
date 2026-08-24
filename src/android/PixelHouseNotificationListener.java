@@ -3,6 +3,7 @@ package com.pixelhouse.notificationlistener;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.provider.Settings;
 import android.text.TextUtils;
 
@@ -11,6 +12,9 @@ import org.apache.cordova.CordovaPlugin;
 
 import org.json.JSONArray;
 import org.json.JSONException;
+
+import java.util.HashSet;
+import java.util.Set;
 
 public class PixelHouseNotificationListener extends CordovaPlugin {
 
@@ -24,17 +28,12 @@ public class PixelHouseNotificationListener extends CordovaPlugin {
         switch (action) {
 
             // =====================================================
-            // Open Android notification access settings
+            // Notification access
             // =====================================================
 
             case "openNotificationAccessSettings":
                 openNotificationAccessSettings(callbackContext);
                 return true;
-
-
-            // =====================================================
-            // Check whether notification access is enabled
-            // =====================================================
 
             case "hasNotificationAccess":
                 callbackContext.success(
@@ -44,42 +43,261 @@ public class PixelHouseNotificationListener extends CordovaPlugin {
 
 
             // =====================================================
+            // Monitored apps / whitelist
+            // =====================================================
+
+            case "addMonitoredApp":
+
+                String packageToAdd =
+                        args.optString(0, "");
+
+                addMonitoredApp(
+                        packageToAdd,
+                        callbackContext
+                );
+
+                return true;
+
+
+            case "removeMonitoredApp":
+
+                String packageToRemove =
+                        args.optString(0, "");
+
+                removeMonitoredApp(
+                        packageToRemove,
+                        callbackContext
+                );
+
+                return true;
+
+
+            case "clearMonitoredApps":
+
+                clearMonitoredApps(
+                        callbackContext
+                );
+
+                return true;
+
+
+            case "isAppMonitored":
+
+                String packageToCheck =
+                        args.optString(0, "");
+
+                callbackContext.success(
+                        isAppMonitored(packageToCheck)
+                                ? 1
+                                : 0
+                );
+
+                return true;
+
+
+            // =====================================================
             // Last captured notification
             // =====================================================
 
             case "getLastPackage":
+
                 callbackContext.success(
-                        PixelHouseNotificationService.getLastPackage()
+                        getPreferences().getString(
+                                PixelHouseNotificationService.KEY_LAST_PACKAGE,
+                                ""
+                        )
                 );
+
                 return true;
 
 
             case "getLastTitle":
+
                 callbackContext.success(
-                        PixelHouseNotificationService.getLastTitle()
+                        getPreferences().getString(
+                                PixelHouseNotificationService.KEY_LAST_TITLE,
+                                ""
+                        )
                 );
+
                 return true;
 
 
             case "getLastText":
+
                 callbackContext.success(
-                        PixelHouseNotificationService.getLastText()
+                        getPreferences().getString(
+                                PixelHouseNotificationService.KEY_LAST_TEXT,
+                                ""
+                        )
                 );
+
                 return true;
 
 
             case "getLastTimestamp":
+
+                long timestamp =
+                        getPreferences().getLong(
+                                PixelHouseNotificationService.KEY_LAST_TIMESTAMP,
+                                0
+                        );
+
                 callbackContext.success(
-                        String.valueOf(
-                                PixelHouseNotificationService.getLastTimestamp()
-                        )
+                        String.valueOf(timestamp)
                 );
+
                 return true;
 
 
             default:
                 return false;
         }
+    }
+
+
+    // =============================================================
+    // Preferences
+    // =============================================================
+
+    private SharedPreferences getPreferences() {
+
+        return cordova
+                .getActivity()
+                .getSharedPreferences(
+                        PixelHouseNotificationService.PREFS_NAME,
+                        Context.MODE_PRIVATE
+                );
+    }
+
+
+    // =============================================================
+    // Add monitored app
+    // =============================================================
+
+    private void addMonitoredApp(
+            String packageName,
+            CallbackContext callbackContext
+    ) {
+
+        packageName =
+                packageName.trim();
+
+        if (packageName.isEmpty()) {
+
+            callbackContext.error(
+                    "Package name must not be empty."
+            );
+
+            return;
+        }
+
+
+        Set<String> current =
+                getPreferences().getStringSet(
+                        PixelHouseNotificationService.KEY_MONITORED_PACKAGES,
+                        new HashSet<String>()
+                );
+
+
+        Set<String> updated =
+                new HashSet<>(current);
+
+
+        updated.add(packageName);
+
+
+        getPreferences()
+                .edit()
+                .putStringSet(
+                        PixelHouseNotificationService.KEY_MONITORED_PACKAGES,
+                        updated
+                )
+                .apply();
+
+
+        callbackContext.success();
+    }
+
+
+    // =============================================================
+    // Remove monitored app
+    // =============================================================
+
+    private void removeMonitoredApp(
+            String packageName,
+            CallbackContext callbackContext
+    ) {
+
+        packageName =
+                packageName.trim();
+
+
+        Set<String> current =
+                getPreferences().getStringSet(
+                        PixelHouseNotificationService.KEY_MONITORED_PACKAGES,
+                        new HashSet<String>()
+                );
+
+
+        Set<String> updated =
+                new HashSet<>(current);
+
+
+        updated.remove(packageName);
+
+
+        getPreferences()
+                .edit()
+                .putStringSet(
+                        PixelHouseNotificationService.KEY_MONITORED_PACKAGES,
+                        updated
+                )
+                .apply();
+
+
+        callbackContext.success();
+    }
+
+
+    // =============================================================
+    // Clear monitored apps
+    // =============================================================
+
+    private void clearMonitoredApps(
+            CallbackContext callbackContext
+    ) {
+
+        getPreferences()
+                .edit()
+                .remove(
+                        PixelHouseNotificationService.KEY_MONITORED_PACKAGES
+                )
+                .apply();
+
+
+        callbackContext.success();
+    }
+
+
+    // =============================================================
+    // Is app monitored?
+    // =============================================================
+
+    private boolean isAppMonitored(
+            String packageName
+    ) {
+
+        Set<String> packages =
+                getPreferences().getStringSet(
+                        PixelHouseNotificationService.KEY_MONITORED_PACKAGES,
+                        new HashSet<String>()
+                );
+
+
+        return packages.contains(
+                packageName.trim()
+        );
     }
 
 
@@ -93,13 +311,19 @@ public class PixelHouseNotificationListener extends CordovaPlugin {
 
         try {
 
-            Intent intent = new Intent(
-                    Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS
+            Intent intent =
+                    new Intent(
+                            Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS
+                    );
+
+            intent.addFlags(
+                    Intent.FLAG_ACTIVITY_NEW_TASK
             );
 
-            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            cordova
+                    .getActivity()
+                    .startActivity(intent);
 
-            cordova.getActivity().startActivity(intent);
 
             callbackContext.success();
 
@@ -119,7 +343,9 @@ public class PixelHouseNotificationListener extends CordovaPlugin {
 
     private boolean hasNotificationAccess() {
 
-        Context context = cordova.getActivity();
+        Context context =
+                cordova.getActivity();
+
 
         String enabledListeners =
                 Settings.Secure.getString(
@@ -127,19 +353,27 @@ public class PixelHouseNotificationListener extends CordovaPlugin {
                         "enabled_notification_listeners"
                 );
 
+
         if (TextUtils.isEmpty(enabledListeners)) {
             return false;
         }
 
-        String packageName = context.getPackageName();
+
+        String packageName =
+                context.getPackageName();
+
 
         String[] listeners =
                 enabledListeners.split(":");
 
+
         for (String listener : listeners) {
 
             ComponentName componentName =
-                    ComponentName.unflattenFromString(listener);
+                    ComponentName.unflattenFromString(
+                            listener
+                    );
+
 
             if (componentName != null
                     && packageName.equals(
@@ -149,6 +383,7 @@ public class PixelHouseNotificationListener extends CordovaPlugin {
                 return true;
             }
         }
+
 
         return false;
     }

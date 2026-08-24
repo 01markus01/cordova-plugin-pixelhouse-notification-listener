@@ -1,20 +1,38 @@
 package com.pixelhouse.notificationlistener;
 
 import android.app.Notification;
+import android.content.ComponentName;
+import android.content.SharedPreferences;
 import android.os.Bundle;
 import android.service.notification.NotificationListenerService;
 import android.service.notification.StatusBarNotification;
 import android.util.Log;
 
+import java.util.Collections;
+import java.util.Set;
+
 public class PixelHouseNotificationService extends NotificationListenerService {
 
     private static final String TAG = "PixelHouseNotif";
 
-    // Last captured notification
-    private static String lastPackage = "";
-    private static String lastTitle = "";
-    private static String lastText = "";
-    private static long lastTimestamp = 0;
+    public static final String PREFS_NAME =
+            "PixelHouseNotificationListenerPrefs";
+
+    public static final String KEY_MONITORED_PACKAGES =
+            "monitored_packages";
+
+    public static final String KEY_LAST_PACKAGE =
+            "last_package";
+
+    public static final String KEY_LAST_TITLE =
+            "last_title";
+
+    public static final String KEY_LAST_TEXT =
+            "last_text";
+
+    public static final String KEY_LAST_TIMESTAMP =
+            "last_timestamp";
+
 
     @Override
     public void onListenerConnected() {
@@ -23,81 +41,207 @@ public class PixelHouseNotificationService extends NotificationListenerService {
         Log.d(TAG, "Notification Listener connected");
     }
 
+
     @Override
     public void onListenerDisconnected() {
         super.onListenerDisconnected();
 
         Log.d(TAG, "Notification Listener disconnected");
+
+        try {
+
+            ComponentName componentName =
+                    new ComponentName(
+                            this,
+                            PixelHouseNotificationService.class
+                    );
+
+            NotificationListenerService.requestRebind(
+                    componentName
+            );
+
+            Log.d(TAG, "Notification Listener rebind requested");
+
+        } catch (Exception e) {
+
+            Log.e(
+                    TAG,
+                    "Could not request listener rebind",
+                    e
+            );
+        }
     }
 
+
     @Override
-    public void onNotificationPosted(StatusBarNotification sbn) {
+    public void onNotificationPosted(
+            StatusBarNotification sbn
+    ) {
+
         super.onNotificationPosted(sbn);
 
         if (sbn == null) {
             return;
         }
 
-        Notification notification = sbn.getNotification();
+
+        String packageName =
+                sbn.getPackageName();
+
+        if (packageName == null
+                || packageName.isEmpty()) {
+
+            return;
+        }
+
+
+        // =========================================================
+        // Check whitelist
+        // =========================================================
+
+        if (!isPackageMonitored(packageName)) {
+
+            Log.d(
+                    TAG,
+                    "Notification ignored from: "
+                            + packageName
+            );
+
+            return;
+        }
+
+
+        Notification notification =
+                sbn.getNotification();
 
         if (notification == null) {
             return;
         }
 
-        Bundle extras = notification.extras;
 
-        String packageName = sbn.getPackageName();
+        Bundle extras =
+                notification.extras;
+
         String title = "";
         String text = "";
+
 
         if (extras != null) {
 
             CharSequence titleSequence =
-                    extras.getCharSequence(Notification.EXTRA_TITLE);
+                    extras.getCharSequence(
+                            Notification.EXTRA_TITLE
+                    );
 
             CharSequence textSequence =
-                    extras.getCharSequence(Notification.EXTRA_TEXT);
+                    extras.getCharSequence(
+                            Notification.EXTRA_TEXT
+                    );
+
 
             if (titleSequence != null) {
-                title = titleSequence.toString();
+
+                title =
+                        titleSequence.toString();
             }
 
+
             if (textSequence != null) {
-                text = textSequence.toString();
+
+                text =
+                        textSequence.toString();
             }
         }
 
-        lastPackage = packageName != null ? packageName : "";
-        lastTitle = title;
-        lastText = text;
-        lastTimestamp = System.currentTimeMillis();
+
+        // Ignore completely empty notifications
+        if (title.isEmpty()
+                && text.isEmpty()) {
+
+            Log.d(
+                    TAG,
+                    "Empty notification ignored from: "
+                            + packageName
+            );
+
+            return;
+        }
+
+
+        long timestamp =
+                System.currentTimeMillis();
+
+
+        // =========================================================
+        // Save notification permanently
+        // =========================================================
+
+        SharedPreferences prefs =
+                getSharedPreferences(
+                        PREFS_NAME,
+                        MODE_PRIVATE
+                );
+
+
+        prefs.edit()
+
+                .putString(
+                        KEY_LAST_PACKAGE,
+                        packageName
+                )
+
+                .putString(
+                        KEY_LAST_TITLE,
+                        title
+                )
+
+                .putString(
+                        KEY_LAST_TEXT,
+                        text
+                )
+
+                .putLong(
+                        KEY_LAST_TIMESTAMP,
+                        timestamp
+                )
+
+                .apply();
+
 
         Log.d(TAG, "--------------------------------");
-        Log.d(TAG, "NEW NOTIFICATION");
-        Log.d(TAG, "Package: " + lastPackage);
-        Log.d(TAG, "Title: " + lastTitle);
-        Log.d(TAG, "Text: " + lastText);
-        Log.d(TAG, "Timestamp: " + lastTimestamp);
+        Log.d(TAG, "SAVED NOTIFICATION");
+        Log.d(TAG, "Package: " + packageName);
+        Log.d(TAG, "Title: " + title);
+        Log.d(TAG, "Text: " + text);
+        Log.d(TAG, "Timestamp: " + timestamp);
         Log.d(TAG, "--------------------------------");
     }
 
-    // =========================================================
-    // Getters for Cordova bridge
-    // =========================================================
 
-    public static String getLastPackage() {
-        return lastPackage;
-    }
+    // =============================================================
+    // Check whether package is on whitelist
+    // =============================================================
 
-    public static String getLastTitle() {
-        return lastTitle;
-    }
+    private boolean isPackageMonitored(
+            String packageName
+    ) {
 
-    public static String getLastText() {
-        return lastText;
-    }
+        SharedPreferences prefs =
+                getSharedPreferences(
+                        PREFS_NAME,
+                        MODE_PRIVATE
+                );
 
-    public static long getLastTimestamp() {
-        return lastTimestamp;
+
+        Set<String> monitoredPackages =
+                prefs.getStringSet(
+                        KEY_MONITORED_PACKAGES,
+                        Collections.<String>emptySet()
+                );
+
+
+        return monitoredPackages.contains(
+                packageName
+        );
     }
 }
