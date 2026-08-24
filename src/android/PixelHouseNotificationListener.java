@@ -704,6 +704,11 @@ public class PixelHouseNotificationListener extends CordovaPlugin {
 
     // =============================================================
     // Clear notification history
+    //
+    // Important:
+    //
+    // Also clears the EXTRA_TEXT_LINES snapshots. This makes the
+    // CLEAR button a true clean reset for the next WhatsApp test.
     // =============================================================
 
     private void clearNotificationHistory(
@@ -731,6 +736,10 @@ public class PixelHouseNotificationListener extends CordovaPlugin {
 
                 .remove(
                         PixelHouseNotificationService.KEY_LAST_TIMESTAMP
+                )
+
+                .remove(
+                        PixelHouseNotificationService.KEY_TEXT_LINE_SNAPSHOTS
                 )
 
                 .remove(

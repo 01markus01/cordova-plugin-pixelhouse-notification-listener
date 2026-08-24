@@ -52,45 +52,30 @@ public class PixelHouseNotificationService
     public static final String KEY_NOTIFICATION_HISTORY =
             "notification_history";
 
-
-    // =============================================================
-    // WhatsApp / TextLines snapshot storage
-    //
-    // Stores the last known EXTRA_TEXT_LINES for every active
-    // Android notification key.
-    //
-    // This allows us to distinguish:
-    //
-    // Update 1:
-    // [1]
-    //
-    // Update 2:
-    // [1, 2]
-    //
-    // Update 3:
-    // [1, 2, 3]
-    //
-    // and save only 1, then 2, then 3.
-    // =============================================================
-
     public static final String KEY_TEXT_LINE_SNAPSHOTS =
             "text_line_snapshots";
-
-
-    // =============================================================
-    // DEBUG
-    // =============================================================
 
     public static final String KEY_DEBUG_REPORT =
             "debug_report";
 
 
     // =============================================================
-    // History settings
+    // History
     // =============================================================
 
     public static final int MAX_NOTIFICATION_HISTORY =
             500;
+
+
+    // =============================================================
+    // WhatsApp packages
+    // =============================================================
+
+    private static final String PACKAGE_WHATSAPP =
+            "com.whatsapp";
+
+    private static final String PACKAGE_WHATSAPP_BUSINESS =
+            "com.whatsapp.w4b";
 
 
     // =============================================================
@@ -183,12 +168,6 @@ public class PixelHouseNotificationService
                 packageName
         )) {
 
-            Log.d(
-                    TAG,
-                    "Notification ignored from: "
-                            + packageName
-            );
-
             return;
         }
 
@@ -212,7 +191,7 @@ public class PixelHouseNotificationService
 
 
         // =========================================================
-        // DEBUG REPORT
+        // Debug report
         // =========================================================
 
         saveDebugReport(
@@ -224,8 +203,91 @@ public class PixelHouseNotificationService
 
 
         // =========================================================
-        // Priority 1:
-        // Android MessagingStyle / EXTRA_MESSAGES
+        // WhatsApp special handling
+        //
+        // Our debug test showed that WhatsApp on the test device
+        // creates a GROUP SUMMARY notification containing:
+        //
+        // EXTRA_TITLE:
+        // Max Schuetz
+        //
+        // EXTRA_TEXT:
+        // 3 neue Nachrichten
+        //
+        // EXTRA_TEXT_LINES:
+        // [0] 1
+        // [1] 2
+        // [2] 3
+        //
+        // WhatsApp also creates child notifications. These caused
+        // duplicate history entries.
+        //
+        // Therefore WhatsApp child notifications are ignored and
+        // only the GROUP SUMMARY is processed.
+        // =========================================================
+
+        if (isWhatsAppPackage(
+                packageName
+        )) {
+
+            boolean isGroupSummary =
+                    (notification.flags
+                            & Notification.FLAG_GROUP_SUMMARY)
+                            != 0;
+
+
+            if (!isGroupSummary) {
+
+                Log.d(
+                        TAG,
+                        "Ignoring WhatsApp child notification"
+                );
+
+                return;
+            }
+
+
+            Log.d(
+                    TAG,
+                    "Processing WhatsApp group summary"
+            );
+
+
+            boolean textLinesFound =
+                    saveTextLineMessages(
+                            sbn,
+                            extras,
+                            packageName
+                    );
+
+
+            if (textLinesFound) {
+
+                return;
+            }
+
+
+            /*
+             * Do not save EXTRA_TEXT as fallback here.
+             *
+             * WhatsApp EXTRA_TEXT can contain:
+             *
+             * "3 neue Nachrichten"
+             *
+             * which is only a summary and not a real message.
+             */
+            Log.d(
+                    TAG,
+                    "WhatsApp summary contained no usable EXTRA_TEXT_LINES"
+            );
+
+            return;
+        }
+
+
+        // =========================================================
+        // Other messenger/apps:
+        // First try MessagingStyle.
         // =========================================================
 
         boolean messagingMessagesFound =
@@ -243,10 +305,7 @@ public class PixelHouseNotificationService
 
 
         // =========================================================
-        // Priority 2:
-        // EXTRA_TEXT_LINES
-        //
-        // This is the important path for WhatsApp on our test device.
+        // Then try EXTRA_TEXT_LINES
         // =========================================================
 
         boolean textLinesFound =
@@ -264,8 +323,7 @@ public class PixelHouseNotificationService
 
 
         // =========================================================
-        // Priority 3:
-        // Normal notification fallback
+        // Standard notification fallback
         // =========================================================
 
         saveStandardNotification(
@@ -278,11 +336,6 @@ public class PixelHouseNotificationService
 
     // =============================================================
     // Notification removed
-    //
-    // When Android removes a notification, delete its TextLines
-    // snapshot. If the same conversation later creates a fresh
-    // notification with the same Android notification key, it can
-    // start a new message sequence cleanly.
     // =============================================================
 
     @Override
@@ -307,22 +360,24 @@ public class PixelHouseNotificationService
 
 
     // =============================================================
+    // Is WhatsApp?
+    // =============================================================
+
+    private boolean isWhatsAppPackage(
+            String packageName
+    ) {
+
+        return PACKAGE_WHATSAPP.equals(
+                packageName
+        )
+                || PACKAGE_WHATSAPP_BUSINESS.equals(
+                packageName
+        );
+    }
+
+
+    // =============================================================
     // EXTRA_TEXT_LINES
-    //
-    // WhatsApp on our test device provides:
-    //
-    // EXTRA_TITLE:
-    // Max Schuetz
-    //
-    // EXTRA_TEXT:
-    // 3 neue Nachrichten
-    //
-    // EXTRA_TEXT_LINES:
-    // [0] 1
-    // [1] 2
-    // [2] 3
-    //
-    // We therefore treat every text line as one message.
     // =============================================================
 
     private boolean saveTextLineMessages(
@@ -396,11 +451,6 @@ public class PixelHouseNotificationService
                     );
 
 
-            // =====================================================
-            // Determine how many lines at the beginning are already
-            // known from the previous update.
-            // =====================================================
-
             int commonPrefixLength =
                     getCommonPrefixLength(
                             previousLines,
@@ -410,17 +460,17 @@ public class PixelHouseNotificationService
 
             Log.d(
                     TAG,
-                    "TextLines current: "
-                            + currentLines.length()
-                            + " previous: "
+                    "TextLines previous="
                             + previousLines.length()
-                            + " common prefix: "
+                            + " current="
+                            + currentLines.length()
+                            + " common="
                             + commonPrefixLength
             );
 
 
             // =====================================================
-            // Save only newly appended / changed lines.
+            // Save only newly appended lines
             // =====================================================
 
             for (
@@ -437,7 +487,6 @@ public class PixelHouseNotificationService
 
 
                 if (text.isEmpty()) {
-
                     continue;
                 }
 
@@ -445,19 +494,6 @@ public class PixelHouseNotificationService
                 long timestamp =
                         System.currentTimeMillis();
 
-
-                /*
-                 * The TextLines snapshot mechanism performs the
-                 * duplicate detection.
-                 *
-                 * Timestamp is included in the ID so that two genuine
-                 * identical messages such as:
-                 *
-                 * "OK"
-                 * "OK"
-                 *
-                 * can both be stored when they are separate entries.
-                 */
 
                 String fingerprint =
                         createTextLineFingerprint(
@@ -493,39 +529,17 @@ public class PixelHouseNotificationService
 
                     Log.d(
                             TAG,
-                            "Saved EXTRA_TEXT_LINES message"
-                    );
-
-                    Log.d(
-                            TAG,
-                            "Package: "
-                                    + packageName
-                    );
-
-                    Log.d(
-                            TAG,
-                            "Title: "
+                            "Saved TextLine: "
                                     + title
-                    );
-
-                    Log.d(
-                            TAG,
-                            "Text: "
+                                    + " | "
                                     + text
-                    );
-
-                    Log.d(
-                            TAG,
-                            "Line index: "
-                                    + i
                     );
                 }
             }
 
 
             // =====================================================
-            // Remember the complete current state for the next
-            // WhatsApp notification update.
+            // Store current state
             // =====================================================
 
             saveTextLineSnapshot(
@@ -535,12 +549,8 @@ public class PixelHouseNotificationService
 
 
             /*
-             * Always return true when EXTRA_TEXT_LINES existed.
-             *
-             * Even if there were no new lines, we must NOT fall back
-             * to EXTRA_TEXT because that contains summaries such as:
-             *
-             * "3 neue Nachrichten"
+             * Even if there were no new lines, this notification has
+             * EXTRA_TEXT_LINES and must not fall back to EXTRA_TEXT.
              */
             return true;
 
@@ -549,7 +559,7 @@ public class PixelHouseNotificationService
 
             Log.e(
                     TAG,
-                    "Could not read EXTRA_TEXT_LINES",
+                    "Could not process EXTRA_TEXT_LINES",
                     e
             );
 
@@ -559,7 +569,7 @@ public class PixelHouseNotificationService
 
 
     // =============================================================
-    // Compare previous and current TextLines
+    // Common prefix
     // =============================================================
 
     private int getCommonPrefixLength(
@@ -567,7 +577,7 @@ public class PixelHouseNotificationService
             JSONArray currentLines
     ) {
 
-        int max =
+        int maximum =
                 Math.min(
                         previousLines.length(),
                         currentLines.length()
@@ -580,7 +590,7 @@ public class PixelHouseNotificationService
 
         for (
                 int i = 0;
-                i < max;
+                i < maximum;
                 i++
         ) {
 
@@ -697,10 +707,6 @@ public class PixelHouseNotificationService
                     );
 
 
-            /*
-             * Make a copy so the stored object is independent.
-             */
-
             JSONArray copy =
                     new JSONArray(
                             lines.toString()
@@ -781,13 +787,6 @@ public class PixelHouseNotificationService
                     .apply();
 
 
-            Log.d(
-                    TAG,
-                    "Removed TextLines snapshot: "
-                            + notificationKey
-            );
-
-
         } catch (Exception e) {
 
             Log.e(
@@ -800,605 +799,7 @@ public class PixelHouseNotificationService
 
 
     // =============================================================
-    // DEBUG REPORT
-    // =============================================================
-
-    private void saveDebugReport(
-            StatusBarNotification sbn,
-            Notification notification,
-            Bundle extras,
-            String packageName
-    ) {
-
-        try {
-
-            StringBuilder report =
-                    new StringBuilder();
-
-
-            report.append(
-                    "PIXEL HOUSE NOTIFICATION DEBUG\n"
-            );
-
-            report.append(
-                    "================================\n\n"
-            );
-
-
-            report.append(
-                    "PACKAGE:\n"
-            );
-
-            report.append(
-                    packageName
-            );
-
-            report.append(
-                    "\n\n"
-            );
-
-
-            report.append(
-                    "NOTIFICATION KEY:\n"
-            );
-
-            report.append(
-                    safeString(
-                            sbn.getKey()
-                    )
-            );
-
-            report.append(
-                    "\n\n"
-            );
-
-
-            report.append(
-                    "NOTIFICATION ID:\n"
-            );
-
-            report.append(
-                    sbn.getId()
-            );
-
-            report.append(
-                    "\n\n"
-            );
-
-
-            report.append(
-                    "TAG:\n"
-            );
-
-            report.append(
-                    safeString(
-                            sbn.getTag()
-                    )
-            );
-
-            report.append(
-                    "\n\n"
-            );
-
-
-            report.append(
-                    "POST TIME:\n"
-            );
-
-            report.append(
-                    sbn.getPostTime()
-            );
-
-            report.append(
-                    "\n\n"
-            );
-
-
-            report.append(
-                    "GROUP KEY:\n"
-            );
-
-            report.append(
-                    safeString(
-                            sbn.getGroupKey()
-                    )
-            );
-
-            report.append(
-                    "\n\n"
-            );
-
-
-            report.append(
-                    "CATEGORY:\n"
-            );
-
-            report.append(
-                    safeString(
-                            notification.category
-                    )
-            );
-
-            report.append(
-                    "\n\n"
-            );
-
-
-            report.append(
-                    "FLAGS:\n"
-            );
-
-            report.append(
-                    notification.flags
-            );
-
-            report.append(
-                    "\n\n"
-            );
-
-
-            appendDebugField(
-                    report,
-                    "EXTRA_TITLE",
-                    extras.getCharSequence(
-                            Notification.EXTRA_TITLE
-                    )
-            );
-
-
-            appendDebugField(
-                    report,
-                    "EXTRA_TEXT",
-                    extras.getCharSequence(
-                            Notification.EXTRA_TEXT
-                    )
-            );
-
-
-            appendDebugField(
-                    report,
-                    "EXTRA_BIG_TEXT",
-                    extras.getCharSequence(
-                            Notification.EXTRA_BIG_TEXT
-                    )
-            );
-
-
-            appendDebugField(
-                    report,
-                    "EXTRA_SUMMARY_TEXT",
-                    extras.getCharSequence(
-                            Notification.EXTRA_SUMMARY_TEXT
-                    )
-            );
-
-
-            appendDebugField(
-                    report,
-                    "EXTRA_SUB_TEXT",
-                    extras.getCharSequence(
-                            Notification.EXTRA_SUB_TEXT
-                    )
-            );
-
-
-            appendDebugField(
-                    report,
-                    "EXTRA_INFO_TEXT",
-                    extras.getCharSequence(
-                            Notification.EXTRA_INFO_TEXT
-                    )
-            );
-
-
-            appendDebugField(
-                    report,
-                    "EXTRA_CONVERSATION_TITLE",
-                    extras.getCharSequence(
-                            Notification.EXTRA_CONVERSATION_TITLE
-                    )
-            );
-
-
-            // =====================================================
-            // EXTRA_TEXT_LINES
-            // =====================================================
-
-            report.append(
-                    "EXTRA_TEXT_LINES:\n"
-            );
-
-
-            CharSequence[] textLines =
-                    extras.getCharSequenceArray(
-                            Notification.EXTRA_TEXT_LINES
-                    );
-
-
-            if (textLines == null
-                    || textLines.length == 0) {
-
-                report.append(
-                        "<none>\n\n"
-                );
-
-            } else {
-
-                for (
-                        int i = 0;
-                        i < textLines.length;
-                        i++
-                ) {
-
-                    report.append(
-                            "["
-                    );
-
-                    report.append(
-                            i
-                    );
-
-                    report.append(
-                            "] "
-                    );
-
-                    report.append(
-                            safeCharSequence(
-                                    textLines[i]
-                            )
-                    );
-
-                    report.append(
-                            "\n"
-                    );
-                }
-
-
-                report.append(
-                        "\n"
-                );
-            }
-
-
-            // =====================================================
-            // EXTRA_MESSAGES
-            // =====================================================
-
-            appendMessagingStyleDebug(
-                    report,
-                    extras,
-                    Notification.EXTRA_MESSAGES,
-                    "EXTRA_MESSAGES"
-            );
-
-
-            // =====================================================
-            // EXTRA_HISTORIC_MESSAGES
-            // =====================================================
-
-            appendMessagingStyleDebug(
-                    report,
-                    extras,
-                    Notification.EXTRA_HISTORIC_MESSAGES,
-                    "EXTRA_HISTORIC_MESSAGES"
-            );
-
-
-            // =====================================================
-            // All keys
-            // =====================================================
-
-            report.append(
-                    "ALL EXTRA KEYS:\n"
-            );
-
-
-            Set<String> keys =
-                    extras.keySet();
-
-
-            if (keys == null
-                    || keys.isEmpty()) {
-
-                report.append(
-                        "<none>\n"
-                );
-
-            } else {
-
-                for (String key : keys) {
-
-                    report.append(
-                            "- "
-                    );
-
-                    report.append(
-                            key
-                    );
-
-
-                    try {
-
-                        Object value =
-                                extras.get(
-                                        key
-                                );
-
-
-                        if (value != null) {
-
-                            report.append(
-                                    " ["
-                            );
-
-                            report.append(
-                                    value
-                                            .getClass()
-                                            .getSimpleName()
-                            );
-
-                            report.append(
-                                    "]"
-                            );
-                        }
-
-                    } catch (Exception ignored) {
-                    }
-
-
-                    report.append(
-                            "\n"
-                    );
-                }
-            }
-
-
-            report.append(
-                    "\n================================\n"
-            );
-
-
-            String debugReport =
-                    report.toString();
-
-
-            getSharedPreferences(
-                    PREFS_NAME,
-                    MODE_PRIVATE
-            )
-                    .edit()
-                    .putString(
-                            KEY_DEBUG_REPORT,
-                            debugReport
-                    )
-                    .apply();
-
-
-            Log.d(
-                    TAG,
-                    debugReport
-            );
-
-
-        } catch (Exception e) {
-
-            Log.e(
-                    TAG,
-                    "Could not create debug report",
-                    e
-            );
-        }
-    }
-
-
-    // =============================================================
-    // DEBUG field
-    // =============================================================
-
-    private void appendDebugField(
-            StringBuilder report,
-            String fieldName,
-            CharSequence value
-    ) {
-
-        report.append(
-                fieldName
-        );
-
-        report.append(
-                ":\n"
-        );
-
-
-        String text =
-                safeCharSequence(
-                        value
-                );
-
-
-        if (text.isEmpty()) {
-
-            report.append(
-                    "<empty>"
-            );
-
-        } else {
-
-            report.append(
-                    text
-            );
-        }
-
-
-        report.append(
-                "\n\n"
-        );
-    }
-
-
-    // =============================================================
-    // DEBUG MessagingStyle
-    // =============================================================
-
-    private void appendMessagingStyleDebug(
-            StringBuilder report,
-            Bundle extras,
-            String extraKey,
-            String debugName
-    ) {
-
-        report.append(
-                debugName
-        );
-
-        report.append(
-                ":\n"
-        );
-
-
-        try {
-
-            Parcelable[] bundles =
-                    extras.getParcelableArray(
-                            extraKey
-                    );
-
-
-            if (bundles == null
-                    || bundles.length == 0) {
-
-                report.append(
-                        "<none>\n\n"
-                );
-
-                return;
-            }
-
-
-            List<Notification.MessagingStyle.Message> messages =
-                    Notification.MessagingStyle.Message
-                            .getMessagesFromBundleArray(
-                                    bundles
-                            );
-
-
-            if (messages == null
-                    || messages.isEmpty()) {
-
-                report.append(
-                        "<unable to parse>\n\n"
-                );
-
-                return;
-            }
-
-
-            report.append(
-                    "Count: "
-            );
-
-            report.append(
-                    messages.size()
-            );
-
-            report.append(
-                    "\n"
-            );
-
-
-            for (
-                    int i = 0;
-                    i < messages.size();
-                    i++
-            ) {
-
-                Notification.MessagingStyle.Message message =
-                        messages.get(
-                                i
-                        );
-
-
-                report.append(
-                        "\nMESSAGE "
-                );
-
-                report.append(
-                        i
-                );
-
-                report.append(
-                        "\n"
-                );
-
-
-                report.append(
-                        "Sender: "
-                );
-
-                report.append(
-                        getMessageSender(
-                                message
-                        )
-                );
-
-                report.append(
-                        "\n"
-                );
-
-
-                report.append(
-                        "Text: "
-                );
-
-                report.append(
-                        safeCharSequence(
-                                message.getText()
-                        )
-                );
-
-                report.append(
-                        "\n"
-                );
-
-
-                report.append(
-                        "Timestamp: "
-                );
-
-                report.append(
-                        message.getTimestamp()
-                );
-
-                report.append(
-                        "\n"
-                );
-            }
-
-
-            report.append(
-                    "\n"
-            );
-
-
-        } catch (Exception e) {
-
-            report.append(
-                    "<error: "
-            );
-
-            report.append(
-                    e.getMessage()
-            );
-
-            report.append(
-                    ">\n\n"
-            );
-        }
-    }
-
-
-    // =============================================================
-    // MessagingStyle messages
+    // MessagingStyle
     // =============================================================
 
     private boolean saveMessagingStyleMessages(
@@ -1455,7 +856,7 @@ public class PixelHouseNotificationService
                 String text =
                         safeCharSequence(
                                 message.getText()
-                        );
+                        ).trim();
 
 
                 if (text.isEmpty()) {
@@ -1543,7 +944,7 @@ public class PixelHouseNotificationService
 
 
     // =============================================================
-    // Standard notification fallback
+    // Standard notification
     // =============================================================
 
     private void saveStandardNotification(
@@ -1630,14 +1031,11 @@ public class PixelHouseNotificationService
             long timestamp
     ) {
 
-        SharedPreferences prefs =
-                getSharedPreferences(
-                        PREFS_NAME,
-                        MODE_PRIVATE
-                );
-
-
-        prefs.edit()
+        getSharedPreferences(
+                PREFS_NAME,
+                MODE_PRIVATE
+        )
+                .edit()
 
                 .putString(
                         KEY_LAST_PACKAGE,
@@ -1711,7 +1109,7 @@ public class PixelHouseNotificationService
                     );
 
 
-            JSONArray trimmedHistory =
+            JSONArray newHistory =
                     appendAndTrimHistory(
                             history,
                             entry
@@ -1721,16 +1119,9 @@ public class PixelHouseNotificationService
             prefs.edit()
                     .putString(
                             KEY_NOTIFICATION_HISTORY,
-                            trimmedHistory.toString()
+                            newHistory.toString()
                     )
                     .apply();
-
-
-            Log.d(
-                    TAG,
-                    "History count: "
-                            + trimmedHistory.length()
-            );
 
 
             return true;
@@ -1740,7 +1131,7 @@ public class PixelHouseNotificationService
 
             Log.e(
                     TAG,
-                    "Could not save notification history",
+                    "Could not save history entry",
                     e
             );
 
@@ -1810,7 +1201,7 @@ public class PixelHouseNotificationService
                     );
 
 
-            JSONArray trimmedHistory =
+            JSONArray newHistory =
                     appendAndTrimHistory(
                             history,
                             entry
@@ -1820,7 +1211,7 @@ public class PixelHouseNotificationService
             prefs.edit()
                     .putString(
                             KEY_NOTIFICATION_HISTORY,
-                            trimmedHistory.toString()
+                            newHistory.toString()
                     )
                     .apply();
 
@@ -1829,12 +1220,6 @@ public class PixelHouseNotificationService
 
 
         } catch (Exception e) {
-
-            Log.e(
-                    TAG,
-                    "Could not save standard notification history",
-                    e
-            );
 
             return false;
         }
@@ -1863,36 +1248,30 @@ public class PixelHouseNotificationService
                 fingerprint
         );
 
-
         entry.put(
                 "fingerprint",
                 fingerprint
         );
-
 
         entry.put(
                 "notificationKey",
                 notificationKey
         );
 
-
         entry.put(
                 "package",
                 packageName
         );
-
 
         entry.put(
                 "title",
                 title
         );
 
-
         entry.put(
                 "text",
                 text
         );
-
 
         entry.put(
                 "timestamp",
@@ -1914,15 +1293,11 @@ public class PixelHouseNotificationService
 
         try {
 
-            String storedHistory =
+            return new JSONArray(
                     prefs.getString(
                             KEY_NOTIFICATION_HISTORY,
                             "[]"
-                    );
-
-
-            return new JSONArray(
-                    storedHistory
+                    )
             );
 
 
@@ -1934,7 +1309,7 @@ public class PixelHouseNotificationService
 
 
     // =============================================================
-    // Append and trim history
+    // Append + trim
     // =============================================================
 
     private JSONArray appendAndTrimHistory(
@@ -1946,16 +1321,11 @@ public class PixelHouseNotificationService
                 new JSONArray();
 
 
-        int numberOfOldEntriesToKeep =
-                MAX_NOTIFICATION_HISTORY
-                        - 1;
-
-
         int startIndex =
                 Math.max(
                         0,
                         oldHistory.length()
-                                - numberOfOldEntriesToKeep
+                                - (MAX_NOTIFICATION_HISTORY - 1)
                 );
 
 
@@ -1983,7 +1353,7 @@ public class PixelHouseNotificationService
 
 
     // =============================================================
-    // Fingerprint already stored?
+    // Fingerprint exists?
     // =============================================================
 
     private boolean historyContainsFingerprint(
@@ -1999,21 +1369,13 @@ public class PixelHouseNotificationService
                     i++
             ) {
 
-                JSONObject entry =
-                        history.getJSONObject(
-                                i
-                        );
-
-
-                String storedFingerprint =
-                        entry.optString(
-                                "fingerprint",
-                                ""
-                        );
-
-
                 if (fingerprint.equals(
-                        storedFingerprint
+                        history
+                                .getJSONObject(i)
+                                .optString(
+                                        "fingerprint",
+                                        ""
+                                )
                 )) {
 
                     return true;
@@ -2056,70 +1418,464 @@ public class PixelHouseNotificationService
                     );
 
 
-            String oldPackage =
-                    lastEntry.optString(
-                            "package",
-                            ""
-                    );
-
-
-            String oldKey =
-                    lastEntry.optString(
-                            "notificationKey",
-                            ""
-                    );
-
-
-            String oldTitle =
-                    lastEntry.optString(
-                            "title",
-                            ""
-                    );
-
-
-            String oldText =
-                    lastEntry.optString(
-                            "text",
-                            ""
-                    );
-
-
-            long oldTimestamp =
-                    lastEntry.optLong(
-                            "timestamp",
-                            0
-                    );
-
-
-            boolean sameContent =
+            boolean same =
                     packageName.equals(
-                            oldPackage
+                            lastEntry.optString(
+                                    "package",
+                                    ""
+                            )
                     )
                             && notificationKey.equals(
-                            oldKey
+                            lastEntry.optString(
+                                    "notificationKey",
+                                    ""
+                            )
                     )
                             && title.equals(
-                            oldTitle
+                            lastEntry.optString(
+                                    "title",
+                                    ""
+                            )
                     )
                             && text.equals(
-                            oldText
+                            lastEntry.optString(
+                                    "text",
+                                    ""
+                            )
                     );
 
 
-            long timeDifference =
+            long difference =
                     Math.abs(
                             timestamp
-                                    - oldTimestamp
+                                    - lastEntry.optLong(
+                                    "timestamp",
+                                    0
+                            )
                     );
 
 
-            return sameContent
-                    && timeDifference <= 3000;
+            return same
+                    && difference <= 3000;
 
 
         } catch (Exception e) {
 
             return false;
+        }
+    }
+
+
+    // =============================================================
+    // Debug report
+    // =============================================================
+
+    private void saveDebugReport(
+            StatusBarNotification sbn,
+            Notification notification,
+            Bundle extras,
+            String packageName
+    ) {
+
+        try {
+
+            StringBuilder report =
+                    new StringBuilder();
+
+
+            report.append(
+                    "PIXEL HOUSE NOTIFICATION DEBUG\n"
+            );
+
+            report.append(
+                    "================================\n\n"
+            );
+
+
+            report.append(
+                    "PACKAGE:\n"
+                            + packageName
+                            + "\n\n"
+            );
+
+
+            report.append(
+                    "NOTIFICATION KEY:\n"
+                            + safeString(
+                            sbn.getKey()
+                    )
+                            + "\n\n"
+            );
+
+
+            report.append(
+                    "NOTIFICATION ID:\n"
+                            + sbn.getId()
+                            + "\n\n"
+            );
+
+
+            report.append(
+                    "TAG:\n"
+                            + safeString(
+                            sbn.getTag()
+                    )
+                            + "\n\n"
+            );
+
+
+            report.append(
+                    "POST TIME:\n"
+                            + sbn.getPostTime()
+                            + "\n\n"
+            );
+
+
+            report.append(
+                    "GROUP KEY:\n"
+                            + safeString(
+                            sbn.getGroupKey()
+                    )
+                            + "\n\n"
+            );
+
+
+            report.append(
+                    "CATEGORY:\n"
+                            + safeString(
+                            notification.category
+                    )
+                            + "\n\n"
+            );
+
+
+            report.append(
+                    "FLAGS:\n"
+                            + notification.flags
+                            + "\n\n"
+            );
+
+
+            report.append(
+                    "IS GROUP SUMMARY:\n"
+                            + (
+                            (notification.flags
+                                    & Notification.FLAG_GROUP_SUMMARY)
+                                    != 0
+                    )
+                            + "\n\n"
+            );
+
+
+            appendDebugField(
+                    report,
+                    "EXTRA_TITLE",
+                    extras.getCharSequence(
+                            Notification.EXTRA_TITLE
+                    )
+            );
+
+
+            appendDebugField(
+                    report,
+                    "EXTRA_TEXT",
+                    extras.getCharSequence(
+                            Notification.EXTRA_TEXT
+                    )
+            );
+
+
+            appendDebugField(
+                    report,
+                    "EXTRA_BIG_TEXT",
+                    extras.getCharSequence(
+                            Notification.EXTRA_BIG_TEXT
+                    )
+            );
+
+
+            appendDebugField(
+                    report,
+                    "EXTRA_SUMMARY_TEXT",
+                    extras.getCharSequence(
+                            Notification.EXTRA_SUMMARY_TEXT
+                    )
+            );
+
+
+            appendDebugField(
+                    report,
+                    "EXTRA_SUB_TEXT",
+                    extras.getCharSequence(
+                            Notification.EXTRA_SUB_TEXT
+                    )
+            );
+
+
+            appendDebugField(
+                    report,
+                    "EXTRA_INFO_TEXT",
+                    extras.getCharSequence(
+                            Notification.EXTRA_INFO_TEXT
+                    )
+            );
+
+
+            appendDebugField(
+                    report,
+                    "EXTRA_CONVERSATION_TITLE",
+                    extras.getCharSequence(
+                            Notification.EXTRA_CONVERSATION_TITLE
+                    )
+            );
+
+
+            report.append(
+                    "EXTRA_TEXT_LINES:\n"
+            );
+
+
+            CharSequence[] textLines =
+                    extras.getCharSequenceArray(
+                            Notification.EXTRA_TEXT_LINES
+                    );
+
+
+            if (textLines == null
+                    || textLines.length == 0) {
+
+                report.append(
+                        "<none>\n\n"
+                );
+
+            } else {
+
+                for (
+                        int i = 0;
+                        i < textLines.length;
+                        i++
+                ) {
+
+                    report.append(
+                            "["
+                                    + i
+                                    + "] "
+                                    + safeCharSequence(
+                                    textLines[i]
+                            )
+                                    + "\n"
+                    );
+                }
+
+
+                report.append(
+                        "\n"
+                );
+            }
+
+
+            appendMessagingStyleDebug(
+                    report,
+                    extras,
+                    Notification.EXTRA_MESSAGES,
+                    "EXTRA_MESSAGES"
+            );
+
+
+            appendMessagingStyleDebug(
+                    report,
+                    extras,
+                    Notification.EXTRA_HISTORIC_MESSAGES,
+                    "EXTRA_HISTORIC_MESSAGES"
+            );
+
+
+            report.append(
+                    "ALL EXTRA KEYS:\n"
+            );
+
+
+            for (String key : extras.keySet()) {
+
+                report.append(
+                        "- "
+                                + key
+                                + "\n"
+                );
+            }
+
+
+            getSharedPreferences(
+                    PREFS_NAME,
+                    MODE_PRIVATE
+            )
+                    .edit()
+                    .putString(
+                            KEY_DEBUG_REPORT,
+                            report.toString()
+                    )
+                    .apply();
+
+
+        } catch (Exception e) {
+
+            Log.e(
+                    TAG,
+                    "Could not create debug report",
+                    e
+            );
+        }
+    }
+
+
+    // =============================================================
+    // Debug field
+    // =============================================================
+
+    private void appendDebugField(
+            StringBuilder report,
+            String name,
+            CharSequence value
+    ) {
+
+        report.append(
+                name
+                        + ":\n"
+        );
+
+
+        String text =
+                safeCharSequence(
+                        value
+                );
+
+
+        report.append(
+                text.isEmpty()
+                        ? "<empty>"
+                        : text
+        );
+
+
+        report.append(
+                "\n\n"
+        );
+    }
+
+
+    // =============================================================
+    // Debug MessagingStyle
+    // =============================================================
+
+    private void appendMessagingStyleDebug(
+            StringBuilder report,
+            Bundle extras,
+            String extraKey,
+            String name
+    ) {
+
+        report.append(
+                name
+                        + ":\n"
+        );
+
+
+        try {
+
+            Parcelable[] bundles =
+                    extras.getParcelableArray(
+                            extraKey
+                    );
+
+
+            if (bundles == null
+                    || bundles.length == 0) {
+
+                report.append(
+                        "<none>\n\n"
+                );
+
+                return;
+            }
+
+
+            List<Notification.MessagingStyle.Message> messages =
+                    Notification.MessagingStyle.Message
+                            .getMessagesFromBundleArray(
+                                    bundles
+                            );
+
+
+            if (messages == null
+                    || messages.isEmpty()) {
+
+                report.append(
+                        "<none>\n\n"
+                );
+
+                return;
+            }
+
+
+            report.append(
+                    "Count: "
+                            + messages.size()
+                            + "\n"
+            );
+
+
+            for (
+                    int i = 0;
+                    i < messages.size();
+                    i++
+            ) {
+
+                Notification.MessagingStyle.Message message =
+                        messages.get(
+                                i
+                        );
+
+
+                report.append(
+                        "MESSAGE "
+                                + i
+                                + "\n"
+                );
+
+                report.append(
+                        "Sender: "
+                                + getMessageSender(
+                                message
+                        )
+                                + "\n"
+                );
+
+                report.append(
+                        "Text: "
+                                + safeCharSequence(
+                                message.getText()
+                        )
+                                + "\n"
+                );
+
+                report.append(
+                        "Timestamp: "
+                                + message.getTimestamp()
+                                + "\n"
+                );
+            }
+
+
+            report.append(
+                    "\n"
+            );
+
+
+        } catch (Exception e) {
+
+            report.append(
+                    "<error>\n\n"
+            );
         }
     }
 
@@ -2132,7 +1888,7 @@ public class PixelHouseNotificationService
             Bundle extras
     ) {
 
-        String conversationTitle =
+        String title =
                 safeCharSequence(
                         extras.getCharSequence(
                                 Notification.EXTRA_CONVERSATION_TITLE
@@ -2140,9 +1896,9 @@ public class PixelHouseNotificationService
                 );
 
 
-        if (!conversationTitle.isEmpty()) {
+        if (!title.isEmpty()) {
 
-            return conversationTitle;
+            return title;
         }
 
 
@@ -2167,20 +1923,16 @@ public class PixelHouseNotificationService
             if (Build.VERSION.SDK_INT
                     >= Build.VERSION_CODES.P) {
 
-                Person senderPerson =
+                Person person =
                         message.getSenderPerson();
 
 
-                if (senderPerson != null) {
+                if (person != null
+                        && person.getName() != null) {
 
-                    CharSequence name =
-                            senderPerson.getName();
-
-
-                    if (name != null) {
-
-                        return name.toString();
-                    }
+                    return person
+                            .getName()
+                            .toString();
                 }
             }
 
@@ -2204,7 +1956,7 @@ public class PixelHouseNotificationService
 
 
     // =============================================================
-    // TextLines fingerprint
+    // Fingerprints
     // =============================================================
 
     private String createTextLineFingerprint(
@@ -2216,7 +1968,7 @@ public class PixelHouseNotificationService
             long timestamp
     ) {
 
-        String raw =
+        return sha256(
                 packageName
                         + "|"
                         + notificationKey
@@ -2227,28 +1979,20 @@ public class PixelHouseNotificationService
                         + "|"
                         + text
                         + "|"
-                        + timestamp;
-
-
-        return sha256(
-                raw
+                        + timestamp
         );
     }
 
-
-    // =============================================================
-    // MessagingStyle fingerprint
-    // =============================================================
 
     private String createMessageFingerprint(
             String packageName,
             String notificationKey,
             String sender,
             String text,
-            long messageTimestamp
+            long timestamp
     ) {
 
-        String raw =
+        return sha256(
                 packageName
                         + "|"
                         + notificationKey
@@ -2257,18 +2001,10 @@ public class PixelHouseNotificationService
                         + "|"
                         + text
                         + "|"
-                        + messageTimestamp;
-
-
-        return sha256(
-                raw
+                        + timestamp
         );
     }
 
-
-    // =============================================================
-    // Standard fingerprint
-    // =============================================================
 
     private String createStandardFingerprint(
             String packageName,
@@ -2277,18 +2013,14 @@ public class PixelHouseNotificationService
             String text
     ) {
 
-        String raw =
+        return sha256(
                 packageName
                         + "|"
                         + notificationKey
                         + "|"
                         + title
                         + "|"
-                        + text;
-
-
-        return sha256(
-                raw
+                        + text
         );
     }
 
@@ -2352,41 +2084,34 @@ public class PixelHouseNotificationService
             String packageName
     ) {
 
-        SharedPreferences prefs =
+        Set<String> packages =
                 getSharedPreferences(
                         PREFS_NAME,
                         MODE_PRIVATE
-                );
+                )
+                        .getStringSet(
+                                KEY_MONITORED_PACKAGES,
+                                Collections.<String>emptySet()
+                        );
 
 
-        Set<String> monitoredPackages =
-                prefs.getStringSet(
-                        KEY_MONITORED_PACKAGES,
-                        Collections.<String>emptySet()
-                );
-
-
-        return monitoredPackages.contains(
+        return packages.contains(
                 packageName
         );
     }
 
 
     // =============================================================
-    // Safe helpers
+    // Helpers
     // =============================================================
 
     private String safeString(
             String value
     ) {
 
-        if (value == null) {
-
-            return "";
-        }
-
-
-        return value;
+        return value == null
+                ? ""
+                : value;
     }
 
 
@@ -2394,12 +2119,8 @@ public class PixelHouseNotificationService
             CharSequence value
     ) {
 
-        if (value == null) {
-
-            return "";
-        }
-
-
-        return value.toString();
+        return value == null
+                ? ""
+                : value.toString();
     }
 }
