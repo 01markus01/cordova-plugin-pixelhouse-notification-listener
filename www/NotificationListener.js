@@ -31,7 +31,11 @@ var NotificationListener = {
     // Monitored apps / whitelist
     // =========================================================
 
-    addMonitoredApp: function (packageName, success, error) {
+    addMonitoredApp: function (
+        packageName,
+        success,
+        error
+    ) {
         exec(
             success,
             error,
@@ -41,7 +45,11 @@ var NotificationListener = {
         );
     },
 
-    removeMonitoredApp: function (packageName, success, error) {
+    removeMonitoredApp: function (
+        packageName,
+        success,
+        error
+    ) {
         exec(
             success,
             error,
@@ -51,7 +59,10 @@ var NotificationListener = {
         );
     },
 
-    clearMonitoredApps: function (success, error) {
+    clearMonitoredApps: function (
+        success,
+        error
+    ) {
         exec(
             success,
             error,
@@ -61,7 +72,11 @@ var NotificationListener = {
         );
     },
 
-    isAppMonitored: function (packageName, success, error) {
+    isAppMonitored: function (
+        packageName,
+        success,
+        error
+    ) {
         exec(
             success,
             error,
@@ -76,7 +91,10 @@ var NotificationListener = {
     // Last captured notification
     // =========================================================
 
-    getLastPackage: function (success, error) {
+    getLastPackage: function (
+        success,
+        error
+    ) {
         exec(
             success,
             error,
@@ -86,7 +104,10 @@ var NotificationListener = {
         );
     },
 
-    getLastTitle: function (success, error) {
+    getLastTitle: function (
+        success,
+        error
+    ) {
         exec(
             success,
             error,
@@ -96,7 +117,10 @@ var NotificationListener = {
         );
     },
 
-    getLastText: function (success, error) {
+    getLastText: function (
+        success,
+        error
+    ) {
         exec(
             success,
             error,
@@ -106,7 +130,10 @@ var NotificationListener = {
         );
     },
 
-    getLastTimestamp: function (success, error) {
+    getLastTimestamp: function (
+        success,
+        error
+    ) {
         exec(
             success,
             error,
@@ -121,7 +148,10 @@ var NotificationListener = {
     // Notification history
     // =========================================================
 
-    getNotificationCount: function (success, error) {
+    getNotificationCount: function (
+        success,
+        error
+    ) {
         exec(
             success,
             error,
@@ -131,7 +161,11 @@ var NotificationListener = {
         );
     },
 
-    getNotificationPackage: function (index, success, error) {
+    getNotificationPackage: function (
+        index,
+        success,
+        error
+    ) {
         exec(
             success,
             error,
@@ -141,7 +175,11 @@ var NotificationListener = {
         );
     },
 
-    getNotificationTitle: function (index, success, error) {
+    getNotificationTitle: function (
+        index,
+        success,
+        error
+    ) {
         exec(
             success,
             error,
@@ -151,7 +189,11 @@ var NotificationListener = {
         );
     },
 
-    getNotificationText: function (index, success, error) {
+    getNotificationText: function (
+        index,
+        success,
+        error
+    ) {
         exec(
             success,
             error,
@@ -161,7 +203,11 @@ var NotificationListener = {
         );
     },
 
-    getNotificationTimestamp: function (index, success, error) {
+    getNotificationTimestamp: function (
+        index,
+        success,
+        error
+    ) {
         exec(
             success,
             error,
@@ -171,7 +217,11 @@ var NotificationListener = {
         );
     },
 
-    getNotificationId: function (index, success, error) {
+    getNotificationId: function (
+        index,
+        success,
+        error
+    ) {
         exec(
             success,
             error,
@@ -181,12 +231,33 @@ var NotificationListener = {
         );
     },
 
-    clearNotificationHistory: function (success, error) {
+    clearNotificationHistory: function (
+        success,
+        error
+    ) {
         exec(
             success,
             error,
             'PixelHouseNotificationListener',
             'clearNotificationHistory',
+            []
+        );
+    },
+
+
+    // =========================================================
+    // DEBUG
+    // =========================================================
+
+    getDebugReport: function (
+        success,
+        error
+    ) {
+        exec(
+            success,
+            error,
+            'PixelHouseNotificationListener',
+            'getDebugReport',
             []
         );
     }

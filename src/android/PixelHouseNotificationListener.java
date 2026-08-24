@@ -265,6 +265,22 @@ public class PixelHouseNotificationListener extends CordovaPlugin {
                 return true;
 
 
+            // =====================================================
+            // DEBUG
+            // =====================================================
+
+            case "getDebugReport":
+
+                callbackContext.success(
+                        getPreferences().getString(
+                                PixelHouseNotificationService.KEY_DEBUG_REPORT,
+                                ""
+                        )
+                );
+
+                return true;
+
+
             default:
 
                 return false;
@@ -675,19 +691,13 @@ public class PixelHouseNotificationListener extends CordovaPlugin {
 
         if (notification == null) {
 
-            return "0";
+            return "";
         }
 
 
-        long id =
-                notification.optLong(
-                        "id",
-                        0
-                );
-
-
-        return String.valueOf(
-                id
+        return notification.optString(
+                "id",
+                ""
         );
     }
 
@@ -721,6 +731,10 @@ public class PixelHouseNotificationListener extends CordovaPlugin {
 
                 .remove(
                         PixelHouseNotificationService.KEY_LAST_TIMESTAMP
+                )
+
+                .remove(
+                        PixelHouseNotificationService.KEY_DEBUG_REPORT
                 )
 
                 .apply();
