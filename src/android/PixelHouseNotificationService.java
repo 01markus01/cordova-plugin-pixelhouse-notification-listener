@@ -17,6 +17,7 @@ import org.json.JSONObject;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.Collections;
+import java.util.List;
 import java.util.Set;
 
 public class PixelHouseNotificationService
@@ -185,10 +186,9 @@ public class PixelHouseNotificationService
         // individual messages in EXTRA_MESSAGES.
         // =========================================================
 
-        boolean messagingMessagesSaved =
+        boolean messagingMessagesFound =
                 saveMessagingStyleMessages(
                         sbn,
-                        notification,
                         extras,
                         packageName
                 );
@@ -200,7 +200,7 @@ public class PixelHouseNotificationService
         // summary such as "3 new messages".
         // =========================================================
 
-        if (messagingMessagesSaved) {
+        if (messagingMessagesFound) {
 
             return;
         }
@@ -224,7 +224,6 @@ public class PixelHouseNotificationService
 
     private boolean saveMessagingStyleMessages(
             StatusBarNotification sbn,
-            Notification notification,
             Bundle extras,
             String packageName
     ) {
@@ -244,7 +243,7 @@ public class PixelHouseNotificationService
             }
 
 
-            Notification.MessagingStyle.Message[] messages =
+            List<Notification.MessagingStyle.Message> messages =
                     Notification.MessagingStyle.Message
                             .getMessagesFromBundleArray(
                                     messageBundles
@@ -252,14 +251,10 @@ public class PixelHouseNotificationService
 
 
             if (messages == null
-                    || messages.length == 0) {
+                    || messages.isEmpty()) {
 
                 return false;
             }
-
-
-            boolean savedAtLeastOne =
-                    false;
 
 
             String conversationTitle =
@@ -345,10 +340,6 @@ public class PixelHouseNotificationService
 
                 if (saved) {
 
-                    savedAtLeastOne =
-                            true;
-
-
                     saveLastNotification(
                             packageName,
                             sender,
@@ -390,8 +381,6 @@ public class PixelHouseNotificationService
 
 
             /*
-             * Important:
-             *
              * Returning true means that the notification contained
              * valid MessagingStyle messages.
              *
@@ -1267,7 +1256,6 @@ public class PixelHouseNotificationService
 
         } catch (Exception e) {
 
-            // Very unlikely fallback.
             return String.valueOf(
                     value.hashCode()
             );
