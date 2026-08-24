@@ -8,6 +8,9 @@ import android.service.notification.NotificationListenerService;
 import android.service.notification.StatusBarNotification;
 import android.util.Log;
 
+import org.json.JSONArray;
+import org.json.JSONObject;
+
 import java.util.Collections;
 import java.util.Set;
 
@@ -32,6 +35,12 @@ public class PixelHouseNotificationService extends NotificationListenerService {
 
     public static final String KEY_LAST_TIMESTAMP =
             "last_timestamp";
+
+    public static final String KEY_NOTIFICATION_HISTORY =
+            "notification_history";
+
+    public static final int MAX_NOTIFICATION_HISTORY =
+            500;
 
 
     @Override
@@ -60,7 +69,10 @@ public class PixelHouseNotificationService extends NotificationListenerService {
                     componentName
             );
 
-            Log.d(TAG, "Notification Listener rebind requested");
+            Log.d(
+                    TAG,
+                    "Notification Listener rebind requested"
+            );
 
         } catch (Exception e) {
 
@@ -173,7 +185,7 @@ public class PixelHouseNotificationService extends NotificationListenerService {
 
 
         // =========================================================
-        // Save notification permanently
+        // Save last notification permanently
         // =========================================================
 
         SharedPreferences prefs =
@@ -208,6 +220,19 @@ public class PixelHouseNotificationService extends NotificationListenerService {
                 .apply();
 
 
+        // =========================================================
+        // Add notification to history
+        // =========================================================
+
+        saveNotificationToHistory(
+                prefs,
+                packageName,
+                title,
+                text,
+                timestamp
+        );
+
+
         Log.d(TAG, "--------------------------------");
         Log.d(TAG, "SAVED NOTIFICATION");
         Log.d(TAG, "Package: " + packageName);
@@ -215,6 +240,120 @@ public class PixelHouseNotificationService extends NotificationListenerService {
         Log.d(TAG, "Text: " + text);
         Log.d(TAG, "Timestamp: " + timestamp);
         Log.d(TAG, "--------------------------------");
+    }
+
+
+    // =============================================================
+    // Save notification to history
+    // =============================================================
+
+    private void saveNotificationToHistory(
+            SharedPreferences prefs,
+            String packageName,
+            String title,
+            String text,
+            long timestamp
+    ) {
+
+        try {
+
+            String storedHistory =
+                    prefs.getString(
+                            KEY_NOTIFICATION_HISTORY,
+                            "[]"
+                    );
+
+
+            JSONArray oldHistory =
+                    new JSONArray(
+                            storedHistory
+                    );
+
+
+            JSONArray newHistory =
+                    new JSONArray();
+
+
+            // Keep enough old entries so the new one
+            // does not exceed the maximum history size.
+            int startIndex =
+                    Math.max(
+                            0,
+                            oldHistory.length()
+                                    - (MAX_NOTIFICATION_HISTORY - 1)
+                    );
+
+
+            for (
+                    int i = startIndex;
+                    i < oldHistory.length();
+                    i++
+            ) {
+
+                newHistory.put(
+                        oldHistory.getJSONObject(i)
+                );
+            }
+
+
+            JSONObject entry =
+                    new JSONObject();
+
+
+            entry.put(
+                    "id",
+                    timestamp
+            );
+
+            entry.put(
+                    "package",
+                    packageName
+            );
+
+            entry.put(
+                    "title",
+                    title
+            );
+
+            entry.put(
+                    "text",
+                    text
+            );
+
+            entry.put(
+                    "timestamp",
+                    timestamp
+            );
+
+
+            newHistory.put(
+                    entry
+            );
+
+
+            prefs.edit()
+                    .putString(
+                            KEY_NOTIFICATION_HISTORY,
+                            newHistory.toString()
+                    )
+                    .apply();
+
+
+            Log.d(
+                    TAG,
+                    "Notification added to history. Count: "
+                            + newHistory.length()
+            );
+
+
+        } catch (Exception e) {
+
+            Log.e(
+                    TAG,
+                    "Could not save notification history",
+                    e
+            );
+        }
     }
 
 

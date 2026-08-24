@@ -12,6 +12,7 @@ import org.apache.cordova.CordovaPlugin;
 
 import org.json.JSONArray;
 import org.json.JSONException;
+import org.json.JSONObject;
 
 import java.util.HashSet;
 import java.util.Set;
@@ -32,13 +33,22 @@ public class PixelHouseNotificationListener extends CordovaPlugin {
             // =====================================================
 
             case "openNotificationAccessSettings":
-                openNotificationAccessSettings(callbackContext);
+
+                openNotificationAccessSettings(
+                        callbackContext
+                );
+
                 return true;
 
+
             case "hasNotificationAccess":
+
                 callbackContext.success(
-                        hasNotificationAccess() ? 1 : 0
+                        hasNotificationAccess()
+                                ? 1
+                                : 0
                 );
+
                 return true;
 
 
@@ -49,7 +59,10 @@ public class PixelHouseNotificationListener extends CordovaPlugin {
             case "addMonitoredApp":
 
                 String packageToAdd =
-                        args.optString(0, "");
+                        args.optString(
+                                0,
+                                ""
+                        );
 
                 addMonitoredApp(
                         packageToAdd,
@@ -62,7 +75,10 @@ public class PixelHouseNotificationListener extends CordovaPlugin {
             case "removeMonitoredApp":
 
                 String packageToRemove =
-                        args.optString(0, "");
+                        args.optString(
+                                0,
+                                ""
+                        );
 
                 removeMonitoredApp(
                         packageToRemove,
@@ -84,10 +100,15 @@ public class PixelHouseNotificationListener extends CordovaPlugin {
             case "isAppMonitored":
 
                 String packageToCheck =
-                        args.optString(0, "");
+                        args.optString(
+                                0,
+                                ""
+                        );
 
                 callbackContext.success(
-                        isAppMonitored(packageToCheck)
+                        isAppMonitored(
+                                packageToCheck
+                        )
                                 ? 1
                                 : 0
                 );
@@ -144,13 +165,108 @@ public class PixelHouseNotificationListener extends CordovaPlugin {
                         );
 
                 callbackContext.success(
-                        String.valueOf(timestamp)
+                        String.valueOf(
+                                timestamp
+                        )
+                );
+
+                return true;
+
+
+            // =====================================================
+            // Notification history
+            // =====================================================
+
+            case "getNotificationCount":
+
+                callbackContext.success(
+                        getNotificationCount()
+                );
+
+                return true;
+
+
+            case "getNotificationPackage":
+
+                callbackContext.success(
+                        getNotificationPackage(
+                                args.optInt(
+                                        0,
+                                        0
+                                )
+                        )
+                );
+
+                return true;
+
+
+            case "getNotificationTitle":
+
+                callbackContext.success(
+                        getNotificationTitle(
+                                args.optInt(
+                                        0,
+                                        0
+                                )
+                        )
+                );
+
+                return true;
+
+
+            case "getNotificationText":
+
+                callbackContext.success(
+                        getNotificationText(
+                                args.optInt(
+                                        0,
+                                        0
+                                )
+                        )
+                );
+
+                return true;
+
+
+            case "getNotificationTimestamp":
+
+                callbackContext.success(
+                        getNotificationTimestamp(
+                                args.optInt(
+                                        0,
+                                        0
+                                )
+                        )
+                );
+
+                return true;
+
+
+            case "getNotificationId":
+
+                callbackContext.success(
+                        getNotificationId(
+                                args.optInt(
+                                        0,
+                                        0
+                                )
+                        )
+                );
+
+                return true;
+
+
+            case "clearNotificationHistory":
+
+                clearNotificationHistory(
+                        callbackContext
                 );
 
                 return true;
 
 
             default:
+
                 return false;
         }
     }
@@ -183,6 +299,7 @@ public class PixelHouseNotificationListener extends CordovaPlugin {
         packageName =
                 packageName.trim();
 
+
         if (packageName.isEmpty()) {
 
             callbackContext.error(
@@ -201,10 +318,14 @@ public class PixelHouseNotificationListener extends CordovaPlugin {
 
 
         Set<String> updated =
-                new HashSet<>(current);
+                new HashSet<>(
+                        current
+                );
 
 
-        updated.add(packageName);
+        updated.add(
+                packageName
+        );
 
 
         getPreferences()
@@ -241,10 +362,14 @@ public class PixelHouseNotificationListener extends CordovaPlugin {
 
 
         Set<String> updated =
-                new HashSet<>(current);
+                new HashSet<>(
+                        current
+                );
 
 
-        updated.remove(packageName);
+        updated.remove(
+                packageName
+        );
 
 
         getPreferences()
@@ -302,6 +427,310 @@ public class PixelHouseNotificationListener extends CordovaPlugin {
 
 
     // =============================================================
+    // Notification history helper
+    // =============================================================
+
+    private JSONArray getNotificationHistory() {
+
+        try {
+
+            String history =
+                    getPreferences().getString(
+                            PixelHouseNotificationService.KEY_NOTIFICATION_HISTORY,
+                            "[]"
+                    );
+
+
+            return new JSONArray(
+                    history
+            );
+
+
+        } catch (Exception e) {
+
+            return new JSONArray();
+        }
+    }
+
+
+    // =============================================================
+    // Convert public index to stored history index
+    //
+    // Public:
+    // 0 = newest notification
+    // 1 = second newest
+    // 2 = third newest
+    //
+    // Stored JSON:
+    // oldest -> newest
+    // =============================================================
+
+    private int getStoredIndex(
+            JSONArray history,
+            int index
+    ) {
+
+        if (index < 0) {
+            return -1;
+        }
+
+
+        int storedIndex =
+                history.length()
+                        - 1
+                        - index;
+
+
+        if (storedIndex < 0
+                || storedIndex >= history.length()) {
+
+            return -1;
+        }
+
+
+        return storedIndex;
+    }
+
+
+    // =============================================================
+    // Get notification object
+    // =============================================================
+
+    private JSONObject getNotificationObject(
+            int index
+    ) {
+
+        try {
+
+            JSONArray history =
+                    getNotificationHistory();
+
+
+            int storedIndex =
+                    getStoredIndex(
+                            history,
+                            index
+                    );
+
+
+            if (storedIndex < 0) {
+
+                return null;
+            }
+
+
+            return history.getJSONObject(
+                    storedIndex
+            );
+
+
+        } catch (Exception e) {
+
+            return null;
+        }
+    }
+
+
+    // =============================================================
+    // Notification count
+    // =============================================================
+
+    private int getNotificationCount() {
+
+        JSONArray history =
+                getNotificationHistory();
+
+
+        return history.length();
+    }
+
+
+    // =============================================================
+    // Notification package
+    // =============================================================
+
+    private String getNotificationPackage(
+            int index
+    ) {
+
+        JSONObject notification =
+                getNotificationObject(
+                        index
+                );
+
+
+        if (notification == null) {
+
+            return "";
+        }
+
+
+        return notification.optString(
+                "package",
+                ""
+        );
+    }
+
+
+    // =============================================================
+    // Notification title
+    // =============================================================
+
+    private String getNotificationTitle(
+            int index
+    ) {
+
+        JSONObject notification =
+                getNotificationObject(
+                        index
+                );
+
+
+        if (notification == null) {
+
+            return "";
+        }
+
+
+        return notification.optString(
+                "title",
+                ""
+        );
+    }
+
+
+    // =============================================================
+    // Notification text
+    // =============================================================
+
+    private String getNotificationText(
+            int index
+    ) {
+
+        JSONObject notification =
+                getNotificationObject(
+                        index
+                );
+
+
+        if (notification == null) {
+
+            return "";
+        }
+
+
+        return notification.optString(
+                "text",
+                ""
+        );
+    }
+
+
+    // =============================================================
+    // Notification timestamp
+    // =============================================================
+
+    private String getNotificationTimestamp(
+            int index
+    ) {
+
+        JSONObject notification =
+                getNotificationObject(
+                        index
+                );
+
+
+        if (notification == null) {
+
+            return "0";
+        }
+
+
+        long timestamp =
+                notification.optLong(
+                        "timestamp",
+                        0
+                );
+
+
+        return String.valueOf(
+                timestamp
+        );
+    }
+
+
+    // =============================================================
+    // Notification ID
+    // =============================================================
+
+    private String getNotificationId(
+            int index
+    ) {
+
+        JSONObject notification =
+                getNotificationObject(
+                        index
+                );
+
+
+        if (notification == null) {
+
+            return "0";
+        }
+
+
+        long id =
+                notification.optLong(
+                        "id",
+                        0
+                );
+
+
+        return String.valueOf(
+                id
+        );
+    }
+
+
+    // =============================================================
+    // Clear notification history
+    // =============================================================
+
+    private void clearNotificationHistory(
+            CallbackContext callbackContext
+    ) {
+
+        getPreferences()
+                .edit()
+
+                .remove(
+                        PixelHouseNotificationService.KEY_NOTIFICATION_HISTORY
+                )
+
+                .remove(
+                        PixelHouseNotificationService.KEY_LAST_PACKAGE
+                )
+
+                .remove(
+                        PixelHouseNotificationService.KEY_LAST_TITLE
+                )
+
+                .remove(
+                        PixelHouseNotificationService.KEY_LAST_TEXT
+                )
+
+                .remove(
+                        PixelHouseNotificationService.KEY_LAST_TIMESTAMP
+                )
+
+                .apply();
+
+
+        callbackContext.success();
+    }
+
+
+    // =============================================================
     // Open notification access settings
     // =============================================================
 
@@ -316,16 +745,21 @@ public class PixelHouseNotificationListener extends CordovaPlugin {
                             Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS
                     );
 
+
             intent.addFlags(
                     Intent.FLAG_ACTIVITY_NEW_TASK
             );
 
+
             cordova
                     .getActivity()
-                    .startActivity(intent);
+                    .startActivity(
+                            intent
+                    );
 
 
             callbackContext.success();
+
 
         } catch (Exception e) {
 
@@ -354,7 +788,10 @@ public class PixelHouseNotificationListener extends CordovaPlugin {
                 );
 
 
-        if (TextUtils.isEmpty(enabledListeners)) {
+        if (TextUtils.isEmpty(
+                enabledListeners
+        )) {
+
             return false;
         }
 
@@ -364,7 +801,9 @@ public class PixelHouseNotificationListener extends CordovaPlugin {
 
 
         String[] listeners =
-                enabledListeners.split(":");
+                enabledListeners.split(
+                        ":"
+                );
 
 
         for (String listener : listeners) {
