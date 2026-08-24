@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<plugin
+    id="cordova-plugin-pixelhouse-notification-listener"
+    version="0.1.0"
+    xmlns="http://apache.org/cordova/ns/plugins/1.0"
+    xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <name>PixelHouseNotificationListener</name>
+
+    <description>
+        Pixel House Android notification listener plugin for Cordova/GDevelop.
+    </description>
+
+    <license>MIT</license>
+
+
+    <!-- ========================================================= -->
+    <!-- JavaScript interface                                      -->
+    <!-- ========================================================= -->
+
+    <js-module
+        src="www/NotificationListener.js"
+        name="NotificationListener">
+
+        <clobbers target="PixelHouseNotificationListener" />
+
+    </js-module>
+
+
+    <!-- ========================================================= -->
+    <!-- Android                                                   -->
+    <!-- ========================================================= -->
+
+    <platform name="android">
+
+
+        <!-- ----------------------------------------------------- -->
+        <!-- Cordova Java bridge                                   -->
+        <!-- ----------------------------------------------------- -->
+
+        <config-file
+            target="res/xml/config.xml"
+            parent="/*">
+
+            <feature name="PixelHouseNotificationListener">
+
+                <param
+                    name="android-package"
+                    value="com.pixelhouse.notificationlistener.PixelHouseNotificationListener" />
+
+            </feature>
+
+        </config-file>
+
+
+        <!-- ----------------------------------------------------- -->
+        <!-- Android Notification Listener Service                 -->
+        <!-- ----------------------------------------------------- -->
+
+        <config-file
+            target="AndroidManifest.xml"
+            parent="/manifest/application">
+
+            <service
+                android:name="com.pixelhouse.notificationlistener.PixelHouseNotificationService"
+                android:label="Pixel House Notification Listener"
+                android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE"
+                android:exported="true">
+
+                <intent-filter>
+
+                    <action
+                        android:name="android.service.notification.NotificationListenerService" />
+
+                </intent-filter>
+
+            </service>
+
+        </config-file>
+
+
+        <!-- ----------------------------------------------------- -->
+        <!-- Java source files                                     -->
+        <!-- ----------------------------------------------------- -->
+
+        <source-file
+            src="src/android/PixelHouseNotificationListener.java"
+            target-dir="src/com/pixelhouse/notificationlistener" />
+
+        <source-file
+            src="src/android/PixelHouseNotificationService.java"
+            target-dir="src/com/pixelhouse/notificationlistener" />
+
+    </platform>
+
+</plugin>

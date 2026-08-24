@@ -1,0 +1,21 @@
+{
+  "name": "cordova-plugin-pixelhouse-notification-listener",
+  "version": "0.1.0",
+  "description": "Pixel House Android notification listener plugin for Cordova and GDevelop.",
+  "cordova": {
+    "id": "cordova-plugin-pixelhouse-notification-listener",
+    "platforms": [
+      "android"
+    ]
+  },
+  "keywords": [
+    "cordova",
+    "android",
+    "notification",
+    "notification-listener",
+    "gdevelop",
+    "pixelhouse"
+  ],
+  "author": "Pixel House Apps",
+  "license": "MIT"
+}
