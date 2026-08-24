@@ -54,6 +54,30 @@ public class PixelHouseNotificationService
 
 
     // =============================================================
+    // WhatsApp / TextLines snapshot storage
+    //
+    // Stores the last known EXTRA_TEXT_LINES for every active
+    // Android notification key.
+    //
+    // This allows us to distinguish:
+    //
+    // Update 1:
+    // [1]
+    //
+    // Update 2:
+    // [1, 2]
+    //
+    // Update 3:
+    // [1, 2, 3]
+    //
+    // and save only 1, then 2, then 3.
+    // =============================================================
+
+    public static final String KEY_TEXT_LINE_SNAPSHOTS =
+            "text_line_snapshots";
+
+
+    // =============================================================
     // DEBUG
     // =============================================================
 
@@ -188,10 +212,7 @@ public class PixelHouseNotificationService
 
 
         // =========================================================
-        // DEBUG
-        //
-        // Save everything useful that Android exposes to us.
-        // This happens BEFORE the normal message processing.
+        // DEBUG REPORT
         // =========================================================
 
         saveDebugReport(
@@ -203,7 +224,8 @@ public class PixelHouseNotificationService
 
 
         // =========================================================
-        // First try Android MessagingStyle messages.
+        // Priority 1:
+        // Android MessagingStyle / EXTRA_MESSAGES
         // =========================================================
 
         boolean messagingMessagesFound =
@@ -214,11 +236,6 @@ public class PixelHouseNotificationService
                 );
 
 
-        // =========================================================
-        // If MessagingStyle messages exist, EXTRA_TEXT is ignored
-        // because it may only contain a summary/count.
-        // =========================================================
-
         if (messagingMessagesFound) {
 
             return;
@@ -226,7 +243,29 @@ public class PixelHouseNotificationService
 
 
         // =========================================================
-        // Fallback for normal notifications
+        // Priority 2:
+        // EXTRA_TEXT_LINES
+        //
+        // This is the important path for WhatsApp on our test device.
+        // =========================================================
+
+        boolean textLinesFound =
+                saveTextLineMessages(
+                        sbn,
+                        extras,
+                        packageName
+                );
+
+
+        if (textLinesFound) {
+
+            return;
+        }
+
+
+        // =========================================================
+        // Priority 3:
+        // Normal notification fallback
         // =========================================================
 
         saveStandardNotification(
@@ -234,6 +273,529 @@ public class PixelHouseNotificationService
                 extras,
                 packageName
         );
+    }
+
+
+    // =============================================================
+    // Notification removed
+    //
+    // When Android removes a notification, delete its TextLines
+    // snapshot. If the same conversation later creates a fresh
+    // notification with the same Android notification key, it can
+    // start a new message sequence cleanly.
+    // =============================================================
+
+    @Override
+    public void onNotificationRemoved(
+            StatusBarNotification sbn
+    ) {
+
+        super.onNotificationRemoved(sbn);
+
+
+        if (sbn == null) {
+            return;
+        }
+
+
+        removeTextLineSnapshot(
+                safeString(
+                        sbn.getKey()
+                )
+        );
+    }
+
+
+    // =============================================================
+    // EXTRA_TEXT_LINES
+    //
+    // WhatsApp on our test device provides:
+    //
+    // EXTRA_TITLE:
+    // Max Schuetz
+    //
+    // EXTRA_TEXT:
+    // 3 neue Nachrichten
+    //
+    // EXTRA_TEXT_LINES:
+    // [0] 1
+    // [1] 2
+    // [2] 3
+    //
+    // We therefore treat every text line as one message.
+    // =============================================================
+
+    private boolean saveTextLineMessages(
+            StatusBarNotification sbn,
+            Bundle extras,
+            String packageName
+    ) {
+
+        try {
+
+            CharSequence[] textLines =
+                    extras.getCharSequenceArray(
+                            Notification.EXTRA_TEXT_LINES
+                    );
+
+
+            if (textLines == null
+                    || textLines.length == 0) {
+
+                return false;
+            }
+
+
+            JSONArray currentLines =
+                    new JSONArray();
+
+
+            for (
+                    CharSequence line
+                    : textLines
+            ) {
+
+                String text =
+                        safeCharSequence(
+                                line
+                        ).trim();
+
+
+                if (!text.isEmpty()) {
+
+                    currentLines.put(
+                            text
+                    );
+                }
+            }
+
+
+            if (currentLines.length() == 0) {
+
+                return false;
+            }
+
+
+            String notificationKey =
+                    safeString(
+                            sbn.getKey()
+                    );
+
+
+            String title =
+                    safeCharSequence(
+                            extras.getCharSequence(
+                                    Notification.EXTRA_TITLE
+                            )
+                    );
+
+
+            JSONArray previousLines =
+                    getTextLineSnapshot(
+                            notificationKey
+                    );
+
+
+            // =====================================================
+            // Determine how many lines at the beginning are already
+            // known from the previous update.
+            // =====================================================
+
+            int commonPrefixLength =
+                    getCommonPrefixLength(
+                            previousLines,
+                            currentLines
+                    );
+
+
+            Log.d(
+                    TAG,
+                    "TextLines current: "
+                            + currentLines.length()
+                            + " previous: "
+                            + previousLines.length()
+                            + " common prefix: "
+                            + commonPrefixLength
+            );
+
+
+            // =====================================================
+            // Save only newly appended / changed lines.
+            // =====================================================
+
+            for (
+                    int i = commonPrefixLength;
+                    i < currentLines.length();
+                    i++
+            ) {
+
+                String text =
+                        currentLines.optString(
+                                i,
+                                ""
+                        );
+
+
+                if (text.isEmpty()) {
+
+                    continue;
+                }
+
+
+                long timestamp =
+                        System.currentTimeMillis();
+
+
+                /*
+                 * The TextLines snapshot mechanism performs the
+                 * duplicate detection.
+                 *
+                 * Timestamp is included in the ID so that two genuine
+                 * identical messages such as:
+                 *
+                 * "OK"
+                 * "OK"
+                 *
+                 * can both be stored when they are separate entries.
+                 */
+
+                String fingerprint =
+                        createTextLineFingerprint(
+                                packageName,
+                                notificationKey,
+                                title,
+                                text,
+                                i,
+                                timestamp
+                        );
+
+
+                boolean saved =
+                        saveHistoryEntry(
+                                packageName,
+                                title,
+                                text,
+                                timestamp,
+                                notificationKey,
+                                fingerprint
+                        );
+
+
+                if (saved) {
+
+                    saveLastNotification(
+                            packageName,
+                            title,
+                            text,
+                            timestamp
+                    );
+
+
+                    Log.d(
+                            TAG,
+                            "Saved EXTRA_TEXT_LINES message"
+                    );
+
+                    Log.d(
+                            TAG,
+                            "Package: "
+                                    + packageName
+                    );
+
+                    Log.d(
+                            TAG,
+                            "Title: "
+                                    + title
+                    );
+
+                    Log.d(
+                            TAG,
+                            "Text: "
+                                    + text
+                    );
+
+                    Log.d(
+                            TAG,
+                            "Line index: "
+                                    + i
+                    );
+                }
+            }
+
+
+            // =====================================================
+            // Remember the complete current state for the next
+            // WhatsApp notification update.
+            // =====================================================
+
+            saveTextLineSnapshot(
+                    notificationKey,
+                    currentLines
+            );
+
+
+            /*
+             * Always return true when EXTRA_TEXT_LINES existed.
+             *
+             * Even if there were no new lines, we must NOT fall back
+             * to EXTRA_TEXT because that contains summaries such as:
+             *
+             * "3 neue Nachrichten"
+             */
+            return true;
+
+
+        } catch (Exception e) {
+
+            Log.e(
+                    TAG,
+                    "Could not read EXTRA_TEXT_LINES",
+                    e
+            );
+
+            return false;
+        }
+    }
+
+
+    // =============================================================
+    // Compare previous and current TextLines
+    // =============================================================
+
+    private int getCommonPrefixLength(
+            JSONArray previousLines,
+            JSONArray currentLines
+    ) {
+
+        int max =
+                Math.min(
+                        previousLines.length(),
+                        currentLines.length()
+                );
+
+
+        int common =
+                0;
+
+
+        for (
+                int i = 0;
+                i < max;
+                i++
+        ) {
+
+            String previous =
+                    previousLines.optString(
+                            i,
+                            ""
+                    );
+
+
+            String current =
+                    currentLines.optString(
+                            i,
+                            ""
+                    );
+
+
+            if (!previous.equals(
+                    current
+            )) {
+
+                break;
+            }
+
+
+            common++;
+        }
+
+
+        return common;
+    }
+
+
+    // =============================================================
+    // Get TextLines snapshot
+    // =============================================================
+
+    private JSONArray getTextLineSnapshot(
+            String notificationKey
+    ) {
+
+        try {
+
+            SharedPreferences prefs =
+                    getSharedPreferences(
+                            PREFS_NAME,
+                            MODE_PRIVATE
+                    );
+
+
+            String raw =
+                    prefs.getString(
+                            KEY_TEXT_LINE_SNAPSHOTS,
+                            "{}"
+                    );
+
+
+            JSONObject snapshots =
+                    new JSONObject(
+                            raw
+                    );
+
+
+            JSONArray snapshot =
+                    snapshots.optJSONArray(
+                            notificationKey
+                    );
+
+
+            if (snapshot == null) {
+
+                return new JSONArray();
+            }
+
+
+            return snapshot;
+
+
+        } catch (Exception e) {
+
+            return new JSONArray();
+        }
+    }
+
+
+    // =============================================================
+    // Save TextLines snapshot
+    // =============================================================
+
+    private void saveTextLineSnapshot(
+            String notificationKey,
+            JSONArray lines
+    ) {
+
+        try {
+
+            SharedPreferences prefs =
+                    getSharedPreferences(
+                            PREFS_NAME,
+                            MODE_PRIVATE
+                    );
+
+
+            String raw =
+                    prefs.getString(
+                            KEY_TEXT_LINE_SNAPSHOTS,
+                            "{}"
+                    );
+
+
+            JSONObject snapshots =
+                    new JSONObject(
+                            raw
+                    );
+
+
+            /*
+             * Make a copy so the stored object is independent.
+             */
+
+            JSONArray copy =
+                    new JSONArray(
+                            lines.toString()
+                    );
+
+
+            snapshots.put(
+                    notificationKey,
+                    copy
+            );
+
+
+            prefs.edit()
+                    .putString(
+                            KEY_TEXT_LINE_SNAPSHOTS,
+                            snapshots.toString()
+                    )
+                    .apply();
+
+
+        } catch (Exception e) {
+
+            Log.e(
+                    TAG,
+                    "Could not save TextLines snapshot",
+                    e
+            );
+        }
+    }
+
+
+    // =============================================================
+    // Remove TextLines snapshot
+    // =============================================================
+
+    private void removeTextLineSnapshot(
+            String notificationKey
+    ) {
+
+        if (notificationKey.isEmpty()) {
+
+            return;
+        }
+
+
+        try {
+
+            SharedPreferences prefs =
+                    getSharedPreferences(
+                            PREFS_NAME,
+                            MODE_PRIVATE
+                    );
+
+
+            String raw =
+                    prefs.getString(
+                            KEY_TEXT_LINE_SNAPSHOTS,
+                            "{}"
+                    );
+
+
+            JSONObject snapshots =
+                    new JSONObject(
+                            raw
+                    );
+
+
+            snapshots.remove(
+                    notificationKey
+            );
+
+
+            prefs.edit()
+                    .putString(
+                            KEY_TEXT_LINE_SNAPSHOTS,
+                            snapshots.toString()
+                    )
+                    .apply();
+
+
+            Log.d(
+                    TAG,
+                    "Removed TextLines snapshot: "
+                            + notificationKey
+            );
+
+
+        } catch (Exception e) {
+
+            Log.e(
+                    TAG,
+                    "Could not remove TextLines snapshot",
+                    e
+            );
+        }
     }
 
 
@@ -262,10 +824,6 @@ public class PixelHouseNotificationService
                     "================================\n\n"
             );
 
-
-            // =====================================================
-            // Basic notification information
-            // =====================================================
 
             report.append(
                     "PACKAGE:\n"
@@ -378,10 +936,6 @@ public class PixelHouseNotificationService
                     "\n\n"
             );
 
-
-            // =====================================================
-            // Standard extras
-            // =====================================================
 
             appendDebugField(
                     report,
@@ -531,7 +1085,7 @@ public class PixelHouseNotificationService
 
 
             // =====================================================
-            // All keys contained in the Bundle
+            // All keys
             // =====================================================
 
             report.append(
@@ -638,7 +1192,7 @@ public class PixelHouseNotificationService
 
 
     // =============================================================
-    // DEBUG: Simple field
+    // DEBUG field
     // =============================================================
 
     private void appendDebugField(
@@ -683,7 +1237,7 @@ public class PixelHouseNotificationService
 
 
     // =============================================================
-    // DEBUG: MessagingStyle array
+    // DEBUG MessagingStyle
     // =============================================================
 
     private void appendMessagingStyleDebug(
@@ -844,7 +1398,7 @@ public class PixelHouseNotificationService
 
 
     // =============================================================
-    // Read MessagingStyle messages
+    // MessagingStyle messages
     // =============================================================
 
     private boolean saveMessagingStyleMessages(
@@ -905,7 +1459,6 @@ public class PixelHouseNotificationService
 
 
                 if (text.isEmpty()) {
-
                     continue;
                 }
 
@@ -968,12 +1521,6 @@ public class PixelHouseNotificationService
                             sender,
                             text,
                             messageTimestamp
-                    );
-
-
-                    Log.d(
-                            TAG,
-                            "Saved MessagingStyle message"
                     );
                 }
             }
@@ -1059,7 +1606,6 @@ public class PixelHouseNotificationService
 
 
         if (!saved) {
-
             return;
         }
 
@@ -1118,7 +1664,7 @@ public class PixelHouseNotificationService
 
 
     // =============================================================
-    // Save MessagingStyle history entry
+    // Save history entry
     // =============================================================
 
     private synchronized boolean saveHistoryEntry(
@@ -1180,6 +1726,13 @@ public class PixelHouseNotificationService
                     .apply();
 
 
+            Log.d(
+                    TAG,
+                    "History count: "
+                            + trimmedHistory.length()
+            );
+
+
             return true;
 
 
@@ -1197,7 +1750,7 @@ public class PixelHouseNotificationService
 
 
     // =============================================================
-    // Save standard history entry
+    // Standard history entry
     // =============================================================
 
     private synchronized boolean saveStandardHistoryEntry(
@@ -1352,7 +1905,7 @@ public class PixelHouseNotificationService
 
 
     // =============================================================
-    // Read stored history
+    // Stored history
     // =============================================================
 
     private JSONArray getStoredHistory(
@@ -1381,7 +1934,7 @@ public class PixelHouseNotificationService
 
 
     // =============================================================
-    // Append + trim history
+    // Append and trim history
     // =============================================================
 
     private JSONArray appendAndTrimHistory(
@@ -1394,7 +1947,8 @@ public class PixelHouseNotificationService
 
 
         int numberOfOldEntriesToKeep =
-                MAX_NOTIFICATION_HISTORY - 1;
+                MAX_NOTIFICATION_HISTORY
+                        - 1;
 
 
         int startIndex =
@@ -1554,7 +2108,8 @@ public class PixelHouseNotificationService
 
             long timeDifference =
                     Math.abs(
-                            timestamp - oldTimestamp
+                            timestamp
+                                    - oldTimestamp
                     );
 
 
@@ -1649,7 +2204,40 @@ public class PixelHouseNotificationService
 
 
     // =============================================================
-    // Messaging fingerprint
+    // TextLines fingerprint
+    // =============================================================
+
+    private String createTextLineFingerprint(
+            String packageName,
+            String notificationKey,
+            String title,
+            String text,
+            int lineIndex,
+            long timestamp
+    ) {
+
+        String raw =
+                packageName
+                        + "|"
+                        + notificationKey
+                        + "|textline|"
+                        + title
+                        + "|"
+                        + lineIndex
+                        + "|"
+                        + text
+                        + "|"
+                        + timestamp;
+
+
+        return sha256(
+                raw
+        );
+    }
+
+
+    // =============================================================
+    // MessagingStyle fingerprint
     // =============================================================
 
     private String createMessageFingerprint(
