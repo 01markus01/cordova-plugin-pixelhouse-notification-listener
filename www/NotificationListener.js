@@ -6,7 +6,10 @@ var NotificationListener = {
     // Notification access
     // =========================================================
 
-    openNotificationAccessSettings: function (success, error) {
+    openNotificationAccessSettings: function (
+        success,
+        error
+    ) {
         exec(
             success,
             error,
@@ -16,7 +19,10 @@ var NotificationListener = {
         );
     },
 
-    hasNotificationAccess: function (success, error) {
+    hasNotificationAccess: function (
+        success,
+        error
+    ) {
         exec(
             success,
             error,
@@ -230,6 +236,30 @@ var NotificationListener = {
             [index]
         );
     },
+
+
+    // =========================================================
+    // NEW:
+    // Get complete notification history as JSON
+    // =========================================================
+
+    getNotificationHistoryJson: function (
+        success,
+        error
+    ) {
+        exec(
+            success,
+            error,
+            'PixelHouseNotificationListener',
+            'getNotificationHistoryJson',
+            []
+        );
+    },
+
+
+    // =========================================================
+    // Clear notification history
+    // =========================================================
 
     clearNotificationHistory: function (
         success,

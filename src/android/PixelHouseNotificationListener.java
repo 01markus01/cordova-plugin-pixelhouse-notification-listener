@@ -256,6 +256,20 @@ public class PixelHouseNotificationListener extends CordovaPlugin {
                 return true;
 
 
+            // =====================================================
+            // NEW:
+            // Return complete history as JSON
+            // =====================================================
+
+            case "getNotificationHistoryJson":
+
+                callbackContext.success(
+                        getNotificationHistoryJson()
+                );
+
+                return true;
+
+
             case "clearNotificationHistory":
 
                 clearNotificationHistory(
@@ -443,7 +457,7 @@ public class PixelHouseNotificationListener extends CordovaPlugin {
 
 
     // =============================================================
-    // Notification history helper
+    // Notification history
     // =============================================================
 
     private JSONArray getNotificationHistory() {
@@ -470,15 +484,33 @@ public class PixelHouseNotificationListener extends CordovaPlugin {
 
 
     // =============================================================
-    // Convert public index to stored history index
+    // NEW:
+    // Complete history JSON
     //
-    // Public:
-    // 0 = newest notification
-    // 1 = second newest
-    // 2 = third newest
+    // Internally the service stores:
     //
-    // Stored JSON:
     // oldest -> newest
+    //
+    // We intentionally return the raw stored array here.
+    // The JavaScript bridge will reverse it once so that GDevelop
+    // can work with:
+    //
+    // index 0 = newest
+    // index 1 = second newest
+    // etc.
+    // =============================================================
+
+    private String getNotificationHistoryJson() {
+
+        return getPreferences().getString(
+                PixelHouseNotificationService.KEY_NOTIFICATION_HISTORY,
+                "[]"
+        );
+    }
+
+
+    // =============================================================
+    // Convert public index to stored history index
     // =============================================================
 
     private int getStoredIndex(
@@ -553,11 +585,8 @@ public class PixelHouseNotificationListener extends CordovaPlugin {
 
     private int getNotificationCount() {
 
-        JSONArray history =
-                getNotificationHistory();
-
-
-        return history.length();
+        return getNotificationHistory()
+                .length();
     }
 
 
@@ -704,11 +733,6 @@ public class PixelHouseNotificationListener extends CordovaPlugin {
 
     // =============================================================
     // Clear notification history
-    //
-    // Important:
-    //
-    // Also clears the EXTRA_TEXT_LINES snapshots. This makes the
-    // CLEAR button a true clean reset for the next WhatsApp test.
     // =============================================================
 
     private void clearNotificationHistory(
