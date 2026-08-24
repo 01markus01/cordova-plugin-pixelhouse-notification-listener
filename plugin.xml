@@ -14,11 +14,6 @@
 
     <license>MIT</license>
 
-
-    <!-- ========================================================= -->
-    <!-- JavaScript interface                                      -->
-    <!-- ========================================================= -->
-
     <js-module
         src="www/NotificationListener.js"
         name="NotificationListener">
@@ -27,17 +22,7 @@
 
     </js-module>
 
-
-    <!-- ========================================================= -->
-    <!-- Android                                                   -->
-    <!-- ========================================================= -->
-
     <platform name="android">
-
-
-        <!-- ----------------------------------------------------- -->
-        <!-- Cordova Java bridge                                   -->
-        <!-- ----------------------------------------------------- -->
 
         <config-file
             target="res/xml/config.xml"
@@ -52,11 +37,6 @@
             </feature>
 
         </config-file>
-
-
-        <!-- ----------------------------------------------------- -->
-        <!-- Android Notification Listener Service                 -->
-        <!-- ----------------------------------------------------- -->
 
         <config-file
             target="AndroidManifest.xml"
@@ -78,11 +58,6 @@
             </service>
 
         </config-file>
-
-
-        <!-- ----------------------------------------------------- -->
-        <!-- Java source files                                     -->
-        <!-- ----------------------------------------------------- -->
 
         <source-file
             src="src/android/PixelHouseNotificationListener.java"
