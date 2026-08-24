@@ -239,8 +239,7 @@ var NotificationListener = {
 
 
     // =========================================================
-    // NEW:
-    // Get complete notification history as JSON
+    // Complete notification history as JSON
     // =========================================================
 
     getNotificationHistoryJson: function (
@@ -258,7 +257,26 @@ var NotificationListener = {
 
 
     // =========================================================
-    // Clear notification history
+    // Delete one history item by index
+    // =========================================================
+
+    deleteNotificationByIndex: function (
+        index,
+        success,
+        error
+    ) {
+        exec(
+            success,
+            error,
+            'PixelHouseNotificationListener',
+            'deleteNotificationByIndex',
+            [index]
+        );
+    },
+
+
+    // =========================================================
+    // Clear complete history
     // =========================================================
 
     clearNotificationHistory: function (

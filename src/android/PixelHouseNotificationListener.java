@@ -257,8 +257,7 @@ public class PixelHouseNotificationListener extends CordovaPlugin {
 
 
             // =====================================================
-            // NEW:
-            // Return complete history as JSON
+            // Complete history JSON
             // =====================================================
 
             case "getNotificationHistoryJson":
@@ -269,6 +268,30 @@ public class PixelHouseNotificationListener extends CordovaPlugin {
 
                 return true;
 
+
+            // =====================================================
+            // Delete one history entry
+            // =====================================================
+
+            case "deleteNotificationByIndex":
+
+                int indexToDelete =
+                        args.optInt(
+                                0,
+                                -1
+                        );
+
+                deleteNotificationByIndex(
+                        indexToDelete,
+                        callbackContext
+                );
+
+                return true;
+
+
+            // =====================================================
+            // Clear complete history
+            // =====================================================
 
             case "clearNotificationHistory":
 
@@ -484,20 +507,7 @@ public class PixelHouseNotificationListener extends CordovaPlugin {
 
 
     // =============================================================
-    // NEW:
     // Complete history JSON
-    //
-    // Internally the service stores:
-    //
-    // oldest -> newest
-    //
-    // We intentionally return the raw stored array here.
-    // The JavaScript bridge will reverse it once so that GDevelop
-    // can work with:
-    //
-    // index 0 = newest
-    // index 1 = second newest
-    // etc.
     // =============================================================
 
     private String getNotificationHistoryJson() {
@@ -510,7 +520,16 @@ public class PixelHouseNotificationListener extends CordovaPlugin {
 
 
     // =============================================================
-    // Convert public index to stored history index
+    // Convert public index to stored index
+    //
+    // Public:
+    //
+    // 0 = newest
+    // 1 = second newest
+    //
+    // Stored:
+    //
+    // oldest -> newest
     // =============================================================
 
     private int getStoredIndex(
@@ -728,6 +747,203 @@ public class PixelHouseNotificationListener extends CordovaPlugin {
                 "id",
                 ""
         );
+    }
+
+
+    // =============================================================
+    // Delete one history item by public index
+    // =============================================================
+
+    private void deleteNotificationByIndex(
+            int index,
+            CallbackContext callbackContext
+    ) {
+
+        try {
+
+            JSONArray history =
+                    getNotificationHistory();
+
+
+            int storedIndex =
+                    getStoredIndex(
+                            history,
+                            index
+                    );
+
+
+            if (storedIndex < 0) {
+
+                callbackContext.error(
+                        "History index out of range."
+                );
+
+                return;
+            }
+
+
+            JSONArray updatedHistory =
+                    new JSONArray();
+
+
+            for (
+                    int i = 0;
+                    i < history.length();
+                    i++
+            ) {
+
+                if (i == storedIndex) {
+
+                    continue;
+                }
+
+
+                updatedHistory.put(
+                        history.getJSONObject(
+                                i
+                        )
+                );
+            }
+
+
+            getPreferences()
+                    .edit()
+                    .putString(
+                            PixelHouseNotificationService.KEY_NOTIFICATION_HISTORY,
+                            updatedHistory.toString()
+                    )
+                    .apply();
+
+
+            // =====================================================
+            // Update "last notification" values too.
+            //
+            // If the newest entry was deleted, the next newest
+            // message becomes the current last notification.
+            // =====================================================
+
+            updateLastNotificationFromHistory(
+                    updatedHistory
+            );
+
+
+            callbackContext.success();
+
+
+        } catch (Exception e) {
+
+            callbackContext.error(
+                    "Could not delete history item: "
+                            + e.getMessage()
+            );
+        }
+    }
+
+
+    // =============================================================
+    // Update last-notification cache after deleting history item
+    // =============================================================
+
+    private void updateLastNotificationFromHistory(
+            JSONArray history
+    ) {
+
+        SharedPreferences.Editor editor =
+                getPreferences().edit();
+
+
+        if (history == null
+                || history.length() == 0) {
+
+            editor
+                    .remove(
+                            PixelHouseNotificationService.KEY_LAST_PACKAGE
+                    )
+
+                    .remove(
+                            PixelHouseNotificationService.KEY_LAST_TITLE
+                    )
+
+                    .remove(
+                            PixelHouseNotificationService.KEY_LAST_TEXT
+                    )
+
+                    .remove(
+                            PixelHouseNotificationService.KEY_LAST_TIMESTAMP
+                    )
+
+                    .apply();
+
+
+            return;
+        }
+
+
+        try {
+
+            JSONObject newest =
+                    history.getJSONObject(
+                            history.length() - 1
+                    );
+
+
+            editor
+                    .putString(
+                            PixelHouseNotificationService.KEY_LAST_PACKAGE,
+                            newest.optString(
+                                    "package",
+                                    ""
+                            )
+                    )
+
+                    .putString(
+                            PixelHouseNotificationService.KEY_LAST_TITLE,
+                            newest.optString(
+                                    "title",
+                                    ""
+                            )
+                    )
+
+                    .putString(
+                            PixelHouseNotificationService.KEY_LAST_TEXT,
+                            newest.optString(
+                                    "text",
+                                    ""
+                            )
+                    )
+
+                    .putLong(
+                            PixelHouseNotificationService.KEY_LAST_TIMESTAMP,
+                            newest.optLong(
+                                    "timestamp",
+                                    0
+                            )
+                    )
+
+                    .apply();
+
+
+        } catch (Exception e) {
+
+            editor
+                    .remove(
+                            PixelHouseNotificationService.KEY_LAST_PACKAGE
+                    )
+
+                    .remove(
+                            PixelHouseNotificationService.KEY_LAST_TITLE
+                    )
+
+                    .remove(
+                            PixelHouseNotificationService.KEY_LAST_TEXT
+                    )
+
+                    .remove(
+                            PixelHouseNotificationService.KEY_LAST_TIMESTAMP
+                    )
+
+                    .apply();
+        }
     }
 
 
