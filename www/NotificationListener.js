@@ -294,6 +294,78 @@ var NotificationListener = {
 
 
     // =========================================================
+    // Package-specific history (v2)
+    // =========================================================
+
+    getNotificationCountForPackage: function (
+        packageName,
+        success,
+        error
+    ) {
+        exec(success, error, 'PixelHouseNotificationListener',
+            'getNotificationCountForPackage', [packageName]);
+    },
+
+    getNotificationHistoryJsonForPackage: function (
+        packageName,
+        success,
+        error
+    ) {
+        exec(success, error, 'PixelHouseNotificationListener',
+            'getNotificationHistoryJsonForPackage', [packageName]);
+    },
+
+    getNotificationPackageForPackage: function (
+        packageName, index, success, error
+    ) {
+        exec(success, error, 'PixelHouseNotificationListener',
+            'getNotificationPackageForPackage', [packageName, index]);
+    },
+
+    getNotificationTitleForPackage: function (
+        packageName, index, success, error
+    ) {
+        exec(success, error, 'PixelHouseNotificationListener',
+            'getNotificationTitleForPackage', [packageName, index]);
+    },
+
+    getNotificationTextForPackage: function (
+        packageName, index, success, error
+    ) {
+        exec(success, error, 'PixelHouseNotificationListener',
+            'getNotificationTextForPackage', [packageName, index]);
+    },
+
+    getNotificationTimestampForPackage: function (
+        packageName, index, success, error
+    ) {
+        exec(success, error, 'PixelHouseNotificationListener',
+            'getNotificationTimestampForPackage', [packageName, index]);
+    },
+
+    getNotificationIdForPackage: function (
+        packageName, index, success, error
+    ) {
+        exec(success, error, 'PixelHouseNotificationListener',
+            'getNotificationIdForPackage', [packageName, index]);
+    },
+
+    deleteNotificationByIndexForPackage: function (
+        packageName, index, success, error
+    ) {
+        exec(success, error, 'PixelHouseNotificationListener',
+            'deleteNotificationByIndexForPackage', [packageName, index]);
+    },
+
+    clearNotificationHistoryForPackage: function (
+        packageName, success, error
+    ) {
+        exec(success, error, 'PixelHouseNotificationListener',
+            'clearNotificationHistoryForPackage', [packageName]);
+    },
+
+
+    // =========================================================
     // DEBUG
     // =========================================================
 

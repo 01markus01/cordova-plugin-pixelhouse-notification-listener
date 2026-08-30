@@ -49,8 +49,17 @@ public class PixelHouseNotificationService
     public static final String KEY_LAST_TIMESTAMP =
             "last_timestamp";
 
+    // Legacy single-list history key (used only for one-time migration).
     public static final String KEY_NOTIFICATION_HISTORY =
             "notification_history";
+
+    // New per-package history storage. Each app/package receives its own
+    // independent JSON array with up to MAX_NOTIFICATION_HISTORY entries.
+    public static final String KEY_NOTIFICATION_HISTORY_PREFIX =
+            "notification_history::";
+
+    public static final String KEY_HISTORY_MIGRATED =
+            "notification_history_migrated_v2";
 
     public static final String KEY_TEXT_LINE_SNAPSHOTS =
             "text_line_snapshots";
@@ -1085,7 +1094,8 @@ public class PixelHouseNotificationService
 
             JSONArray history =
                     getStoredHistory(
-                            prefs
+                            prefs,
+                            packageName
                     );
 
 
@@ -1118,7 +1128,7 @@ public class PixelHouseNotificationService
 
             prefs.edit()
                     .putString(
-                            KEY_NOTIFICATION_HISTORY,
+                            getHistoryPreferenceKey(packageName),
                             newHistory.toString()
                     )
                     .apply();
@@ -1164,7 +1174,8 @@ public class PixelHouseNotificationService
 
             JSONArray history =
                     getStoredHistory(
-                            prefs
+                            prefs,
+                            packageName
                     );
 
 
@@ -1210,7 +1221,7 @@ public class PixelHouseNotificationService
 
             prefs.edit()
                     .putString(
-                            KEY_NOTIFICATION_HISTORY,
+                            getHistoryPreferenceKey(packageName),
                             newHistory.toString()
                     )
                     .apply();
@@ -1284,18 +1295,188 @@ public class PixelHouseNotificationService
 
 
     // =============================================================
-    // Stored history
+    // Per-package history storage
     // =============================================================
 
-    private JSONArray getStoredHistory(
+    public static String getHistoryPreferenceKey(
+            String packageName
+    ) {
+
+        String safePackage =
+                packageName == null
+                        ? ""
+                        : packageName.trim();
+
+        return KEY_NOTIFICATION_HISTORY_PREFIX
+                + safePackage;
+    }
+
+
+    // =============================================================
+    // One-time migration from the old shared history list
+    // =============================================================
+
+    public static synchronized void migrateLegacyHistoryIfNeeded(
             SharedPreferences prefs
     ) {
+
+        if (prefs == null
+                || prefs.getBoolean(
+                        KEY_HISTORY_MIGRATED,
+                        false
+                )) {
+
+            return;
+        }
+
+        try {
+
+            String legacyJson =
+                    prefs.getString(
+                            KEY_NOTIFICATION_HISTORY,
+                            "[]"
+                    );
+
+            JSONArray legacyHistory =
+                    new JSONArray(
+                            legacyJson == null
+                                    ? "[]"
+                                    : legacyJson
+                    );
+
+            JSONObject grouped =
+                    new JSONObject();
+
+            for (
+                    int i = 0;
+                    i < legacyHistory.length();
+                    i++
+            ) {
+
+                JSONObject entry =
+                        legacyHistory.optJSONObject(i);
+
+                if (entry == null) {
+                    continue;
+                }
+
+                String packageName =
+                        entry.optString(
+                                "package",
+                                ""
+                        ).trim();
+
+                if (packageName.isEmpty()) {
+                    continue;
+                }
+
+                JSONArray packageHistory =
+                        grouped.optJSONArray(
+                                packageName
+                        );
+
+                if (packageHistory == null) {
+
+                    packageHistory =
+                            new JSONArray();
+
+                    grouped.put(
+                            packageName,
+                            packageHistory
+                    );
+                }
+
+                packageHistory.put(
+                        entry
+                );
+            }
+
+            SharedPreferences.Editor editor =
+                    prefs.edit();
+
+            java.util.Iterator<String> keys =
+                    grouped.keys();
+
+            while (keys.hasNext()) {
+
+                String packageName =
+                        keys.next();
+
+                JSONArray packageHistory =
+                        grouped.optJSONArray(
+                                packageName
+                        );
+
+                if (packageHistory == null) {
+                    continue;
+                }
+
+                JSONArray trimmed =
+                        new JSONArray();
+
+                int startIndex =
+                        Math.max(
+                                0,
+                                packageHistory.length()
+                                        - MAX_NOTIFICATION_HISTORY
+                        );
+
+                for (
+                        int i = startIndex;
+                        i < packageHistory.length();
+                        i++
+                ) {
+
+                    trimmed.put(
+                            packageHistory.opt(i)
+                    );
+                }
+
+                editor.putString(
+                        getHistoryPreferenceKey(
+                                packageName
+                        ),
+                        trimmed.toString()
+                );
+            }
+
+            editor
+                    .remove(
+                            KEY_NOTIFICATION_HISTORY
+                    )
+                    .putBoolean(
+                            KEY_HISTORY_MIGRATED,
+                            true
+                    )
+                    .apply();
+
+        } catch (Exception e) {
+
+            Log.e(
+                    TAG,
+                    "Could not migrate legacy notification history",
+                    e
+            );
+        }
+    }
+
+
+    private JSONArray getStoredHistory(
+            SharedPreferences prefs,
+            String packageName
+    ) {
+
+        migrateLegacyHistoryIfNeeded(
+                prefs
+        );
 
         try {
 
             return new JSONArray(
                     prefs.getString(
-                            KEY_NOTIFICATION_HISTORY,
+                            getHistoryPreferenceKey(
+                                    packageName
+                            ),
                             "[]"
                     )
             );

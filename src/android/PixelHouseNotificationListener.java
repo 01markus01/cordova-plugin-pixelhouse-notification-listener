@@ -14,7 +14,11 @@ import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashSet;
+import java.util.Map;
 import java.util.Set;
 
 public class PixelHouseNotificationListener extends CordovaPlugin {
@@ -303,6 +307,113 @@ public class PixelHouseNotificationListener extends CordovaPlugin {
 
 
             // =====================================================
+            // Package-specific notification history (v2)
+            // =====================================================
+
+            case "getNotificationCountForPackage":
+
+                callbackContext.success(
+                        getNotificationCount(
+                                args.optString(0, "")
+                        )
+                );
+
+                return true;
+
+
+            case "getNotificationHistoryJsonForPackage":
+
+                callbackContext.success(
+                        getNotificationHistoryJson(
+                                args.optString(0, "")
+                        )
+                );
+
+                return true;
+
+
+            case "getNotificationPackageForPackage":
+
+                callbackContext.success(
+                        getNotificationPackage(
+                                args.optString(0, ""),
+                                args.optInt(1, 0)
+                        )
+                );
+
+                return true;
+
+
+            case "getNotificationTitleForPackage":
+
+                callbackContext.success(
+                        getNotificationTitle(
+                                args.optString(0, ""),
+                                args.optInt(1, 0)
+                        )
+                );
+
+                return true;
+
+
+            case "getNotificationTextForPackage":
+
+                callbackContext.success(
+                        getNotificationText(
+                                args.optString(0, ""),
+                                args.optInt(1, 0)
+                        )
+                );
+
+                return true;
+
+
+            case "getNotificationTimestampForPackage":
+
+                callbackContext.success(
+                        getNotificationTimestamp(
+                                args.optString(0, ""),
+                                args.optInt(1, 0)
+                        )
+                );
+
+                return true;
+
+
+            case "getNotificationIdForPackage":
+
+                callbackContext.success(
+                        getNotificationId(
+                                args.optString(0, ""),
+                                args.optInt(1, 0)
+                        )
+                );
+
+                return true;
+
+
+            case "deleteNotificationByIndexForPackage":
+
+                deleteNotificationByIndex(
+                        args.optString(0, ""),
+                        args.optInt(1, -1),
+                        callbackContext
+                );
+
+                return true;
+
+
+            case "clearNotificationHistoryForPackage":
+
+                clearNotificationHistory(
+                        args.optString(0, ""),
+                        callbackContext
+                );
+
+                return true;
+
+
+            // =====================================================
             // DEBUG
             // =====================================================
 
@@ -485,19 +596,140 @@ public class PixelHouseNotificationListener extends CordovaPlugin {
 
     private JSONArray getNotificationHistory() {
 
+        return getNotificationHistory(
+                ""
+        );
+    }
+
+
+    private JSONArray getNotificationHistory(
+            String packageName
+    ) {
+
+        SharedPreferences prefs =
+                getPreferences();
+
+        PixelHouseNotificationService
+                .migrateLegacyHistoryIfNeeded(
+                        prefs
+                );
+
+        String normalizedPackage =
+                packageName == null
+                        ? ""
+                        : packageName.trim();
+
+        if (!normalizedPackage.isEmpty()) {
+
+            try {
+
+                return new JSONArray(
+                        prefs.getString(
+                                PixelHouseNotificationService
+                                        .getHistoryPreferenceKey(
+                                                normalizedPackage
+                                        ),
+                                "[]"
+                        )
+                );
+
+            } catch (Exception e) {
+
+                return new JSONArray();
+            }
+        }
+
+        // Legacy compatibility: no package supplied means a combined
+        // history of all per-package lists, sorted oldest -> newest.
+        ArrayList<JSONObject> entries =
+                new ArrayList<>();
+
         try {
 
-            String history =
-                    getPreferences().getString(
-                            PixelHouseNotificationService.KEY_NOTIFICATION_HISTORY,
-                            "[]"
-                    );
+            Map<String, ?> all =
+                    prefs.getAll();
 
+            for (
+                    Map.Entry<String, ?> item
+                            : all.entrySet()
+            ) {
 
-            return new JSONArray(
-                    history
+                String key =
+                        item.getKey();
+
+                if (key == null
+                        || !key.startsWith(
+                                PixelHouseNotificationService
+                                        .KEY_NOTIFICATION_HISTORY_PREFIX
+                        )) {
+
+                    continue;
+                }
+
+                Object value =
+                        item.getValue();
+
+                if (!(value instanceof String)) {
+                    continue;
+                }
+
+                JSONArray packageHistory =
+                        new JSONArray(
+                                (String) value
+                        );
+
+                for (
+                        int i = 0;
+                        i < packageHistory.length();
+                        i++
+                ) {
+
+                    JSONObject entry =
+                            packageHistory.optJSONObject(i);
+
+                    if (entry != null) {
+                        entries.add(entry);
+                    }
+                }
+            }
+
+            Collections.sort(
+                    entries,
+                    new Comparator<JSONObject>() {
+                        @Override
+                        public int compare(
+                                JSONObject a,
+                                JSONObject b
+                        ) {
+
+                            long ta =
+                                    a.optLong(
+                                            "timestamp",
+                                            0
+                                    );
+
+                            long tb =
+                                    b.optLong(
+                                            "timestamp",
+                                            0
+                                    );
+
+                            return Long.compare(
+                                    ta,
+                                    tb
+                            );
+                        }
+                    }
             );
 
+            JSONArray combined =
+                    new JSONArray();
+
+            for (JSONObject entry : entries) {
+                combined.put(entry);
+            }
+
+            return combined;
 
         } catch (Exception e) {
 
@@ -512,10 +744,18 @@ public class PixelHouseNotificationListener extends CordovaPlugin {
 
     private String getNotificationHistoryJson() {
 
-        return getPreferences().getString(
-                PixelHouseNotificationService.KEY_NOTIFICATION_HISTORY,
-                "[]"
-        );
+        return getNotificationHistory()
+                .toString();
+    }
+
+
+    private String getNotificationHistoryJson(
+            String packageName
+    ) {
+
+        return getNotificationHistory(
+                packageName
+        ).toString();
     }
 
 
@@ -567,10 +807,24 @@ public class PixelHouseNotificationListener extends CordovaPlugin {
             int index
     ) {
 
+        return getNotificationObject(
+                "",
+                index
+        );
+    }
+
+
+    private JSONObject getNotificationObject(
+            String packageName,
+            int index
+    ) {
+
         try {
 
             JSONArray history =
-                    getNotificationHistory();
+                    getNotificationHistory(
+                            packageName
+                    );
 
 
             int storedIndex =
@@ -606,6 +860,16 @@ public class PixelHouseNotificationListener extends CordovaPlugin {
 
         return getNotificationHistory()
                 .length();
+    }
+
+
+    private int getNotificationCount(
+            String packageName
+    ) {
+
+        return getNotificationHistory(
+                packageName
+        ).length();
     }
 
 
@@ -751,6 +1015,114 @@ public class PixelHouseNotificationListener extends CordovaPlugin {
 
 
     // =============================================================
+    // Package-specific indexed getters
+    // =============================================================
+
+    private String getNotificationPackage(
+            String packageName,
+            int index
+    ) {
+
+        JSONObject notification =
+                getNotificationObject(
+                        packageName,
+                        index
+                );
+
+        return notification == null
+                ? ""
+                : notification.optString(
+                        "package",
+                        ""
+                );
+    }
+
+
+    private String getNotificationTitle(
+            String packageName,
+            int index
+    ) {
+
+        JSONObject notification =
+                getNotificationObject(
+                        packageName,
+                        index
+                );
+
+        return notification == null
+                ? ""
+                : notification.optString(
+                        "title",
+                        ""
+                );
+    }
+
+
+    private String getNotificationText(
+            String packageName,
+            int index
+    ) {
+
+        JSONObject notification =
+                getNotificationObject(
+                        packageName,
+                        index
+                );
+
+        return notification == null
+                ? ""
+                : notification.optString(
+                        "text",
+                        ""
+                );
+    }
+
+
+    private String getNotificationTimestamp(
+            String packageName,
+            int index
+    ) {
+
+        JSONObject notification =
+                getNotificationObject(
+                        packageName,
+                        index
+                );
+
+        if (notification == null) {
+            return "0";
+        }
+
+        return String.valueOf(
+                notification.optLong(
+                        "timestamp",
+                        0
+                )
+        );
+    }
+
+
+    private String getNotificationId(
+            String packageName,
+            int index
+    ) {
+
+        JSONObject notification =
+                getNotificationObject(
+                        packageName,
+                        index
+                );
+
+        return notification == null
+                ? ""
+                : notification.optString(
+                        "id",
+                        ""
+                );
+    }
+
+
+    // =============================================================
     // Delete one history item by public index
     // =============================================================
 
@@ -759,18 +1131,128 @@ public class PixelHouseNotificationListener extends CordovaPlugin {
             CallbackContext callbackContext
     ) {
 
+        // Legacy compatibility: resolve the selected item from the
+        // combined history and then delete it from its package list.
+        try {
+
+            JSONObject selected =
+                    getNotificationObject(
+                            index
+                    );
+
+            if (selected == null) {
+
+                callbackContext.error(
+                        "History index out of range."
+                );
+
+                return;
+            }
+
+            String packageName =
+                    selected.optString(
+                            "package",
+                            ""
+                    );
+
+            String id =
+                    selected.optString(
+                            "id",
+                            ""
+                    );
+
+            JSONArray packageHistory =
+                    getNotificationHistory(
+                            packageName
+                    );
+
+            int packagePublicIndex = -1;
+
+            for (
+                    int storedIndex = 0;
+                    storedIndex < packageHistory.length();
+                    storedIndex++
+            ) {
+
+                JSONObject item =
+                        packageHistory.optJSONObject(
+                                storedIndex
+                        );
+
+                if (item != null
+                        && id.equals(
+                                item.optString(
+                                        "id",
+                                        ""
+                                )
+                        )) {
+
+                    packagePublicIndex =
+                            packageHistory.length()
+                                    - 1
+                                    - storedIndex;
+
+                    break;
+                }
+            }
+
+            if (packagePublicIndex < 0) {
+
+                callbackContext.error(
+                        "Could not resolve history item in package list."
+                );
+
+                return;
+            }
+
+            deleteNotificationByIndex(
+                    packageName,
+                    packagePublicIndex,
+                    callbackContext
+            );
+
+        } catch (Exception e) {
+
+            callbackContext.error(
+                    "Could not delete history item: "
+                            + e.getMessage()
+            );
+        }
+    }
+
+
+    private void deleteNotificationByIndex(
+            String packageName,
+            int index,
+            CallbackContext callbackContext
+    ) {
+
+        String normalizedPackage =
+                packageName == null
+                        ? ""
+                        : packageName.trim();
+
+        if (normalizedPackage.isEmpty()) {
+
+            callbackContext.error(
+                    "Package ID is required for deleting a history item."
+            );
+
+            return;
+        }
+
         try {
 
             JSONArray history =
-                    getNotificationHistory();
-
+                    getNotificationHistory(
+                            normalizedPackage
+                    );
 
             int storedIndex =
                     getStoredIndex(
                             history,
                             index
                     );
-
 
             if (storedIndex < 0) {
 
@@ -781,10 +1263,8 @@ public class PixelHouseNotificationListener extends CordovaPlugin {
                 return;
             }
 
-
             JSONArray updatedHistory =
                     new JSONArray();
-
 
             for (
                     int i = 0;
@@ -793,42 +1273,28 @@ public class PixelHouseNotificationListener extends CordovaPlugin {
             ) {
 
                 if (i == storedIndex) {
-
                     continue;
                 }
 
-
                 updatedHistory.put(
-                        history.getJSONObject(
-                                i
-                        )
+                        history.getJSONObject(i)
                 );
             }
-
 
             getPreferences()
                     .edit()
                     .putString(
-                            PixelHouseNotificationService.KEY_NOTIFICATION_HISTORY,
+                            PixelHouseNotificationService
+                                    .getHistoryPreferenceKey(
+                                            normalizedPackage
+                                    ),
                             updatedHistory.toString()
                     )
                     .apply();
 
-
-            // =====================================================
-            // Update "last notification" values too.
-            //
-            // If the newest entry was deleted, the next newest
-            // message becomes the current last notification.
-            // =====================================================
-
-            updateLastNotificationFromHistory(
-                    updatedHistory
-            );
-
+            updateLastNotificationFromAllHistories();
 
             callbackContext.success();
-
 
         } catch (Exception e) {
 
@@ -947,6 +1413,14 @@ public class PixelHouseNotificationListener extends CordovaPlugin {
     }
 
 
+    private void updateLastNotificationFromAllHistories() {
+
+        updateLastNotificationFromHistory(
+                getNotificationHistory()
+        );
+    }
+
+
     // =============================================================
     // Clear notification history
     // =============================================================
@@ -955,39 +1429,81 @@ public class PixelHouseNotificationListener extends CordovaPlugin {
             CallbackContext callbackContext
     ) {
 
-        getPreferences()
-                .edit()
+        // Legacy compatibility: clear all package histories.
+        SharedPreferences prefs =
+                getPreferences();
 
-                .remove(
-                        PixelHouseNotificationService.KEY_NOTIFICATION_HISTORY
-                )
+        PixelHouseNotificationService
+                .migrateLegacyHistoryIfNeeded(
+                        prefs
+                );
 
-                .remove(
-                        PixelHouseNotificationService.KEY_LAST_PACKAGE
-                )
+        SharedPreferences.Editor editor =
+                prefs.edit();
 
-                .remove(
-                        PixelHouseNotificationService.KEY_LAST_TITLE
-                )
+        for (String key : prefs.getAll().keySet()) {
 
-                .remove(
-                        PixelHouseNotificationService.KEY_LAST_TEXT
-                )
+            if (key != null
+                    && key.startsWith(
+                            PixelHouseNotificationService
+                                    .KEY_NOTIFICATION_HISTORY_PREFIX
+                    )) {
 
-                .remove(
-                        PixelHouseNotificationService.KEY_LAST_TIMESTAMP
-                )
+                editor.remove(key);
+            }
+        }
 
-                .remove(
-                        PixelHouseNotificationService.KEY_TEXT_LINE_SNAPSHOTS
-                )
-
-                .remove(
-                        PixelHouseNotificationService.KEY_DEBUG_REPORT
-                )
-
+        editor
+                .remove(PixelHouseNotificationService.KEY_NOTIFICATION_HISTORY)
+                .remove(PixelHouseNotificationService.KEY_LAST_PACKAGE)
+                .remove(PixelHouseNotificationService.KEY_LAST_TITLE)
+                .remove(PixelHouseNotificationService.KEY_LAST_TEXT)
+                .remove(PixelHouseNotificationService.KEY_LAST_TIMESTAMP)
+                .remove(PixelHouseNotificationService.KEY_TEXT_LINE_SNAPSHOTS)
+                .remove(PixelHouseNotificationService.KEY_DEBUG_REPORT)
                 .apply();
 
+        callbackContext.success();
+    }
+
+
+    private void clearNotificationHistory(
+            String packageName,
+            CallbackContext callbackContext
+    ) {
+
+        String normalizedPackage =
+                packageName == null
+                        ? ""
+                        : packageName.trim();
+
+        if (normalizedPackage.isEmpty()) {
+
+            callbackContext.error(
+                    "Package ID is required for clearing a package history."
+            );
+
+            return;
+        }
+
+        SharedPreferences prefs =
+                getPreferences();
+
+        PixelHouseNotificationService
+                .migrateLegacyHistoryIfNeeded(
+                        prefs
+                );
+
+        prefs.edit()
+                .remove(
+                        PixelHouseNotificationService
+                                .getHistoryPreferenceKey(
+                                        normalizedPackage
+                                )
+                )
+                .apply();
+
+        updateLastNotificationFromAllHistories();
 
         callbackContext.success();
     }
