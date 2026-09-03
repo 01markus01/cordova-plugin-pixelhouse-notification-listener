@@ -380,6 +380,19 @@ var NotificationListener = {
             'getDebugReport',
             []
         );
+    },
+
+    copyDebugReportToClipboard: function (
+        success,
+        error
+    ) {
+        exec(
+            success,
+            error,
+            'PixelHouseNotificationListener',
+            'copyDebugReportToClipboard',
+            []
+        );
     }
 
 };

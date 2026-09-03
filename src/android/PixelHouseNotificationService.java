@@ -1684,7 +1684,7 @@ public class PixelHouseNotificationService
 
             report.append(
                     "PLUGIN VERSION:\n"
-                            + "0.3.0-diagnostic.1"
+                            + "0.3.0-diagnostic.2"
                             + "\n\n"
             );
 

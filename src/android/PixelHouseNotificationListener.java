@@ -1,5 +1,7 @@
 package com.pixelhouse.notificationlistener;
 
+import android.content.ClipData;
+import android.content.ClipboardManager;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
@@ -429,9 +431,92 @@ public class PixelHouseNotificationListener extends CordovaPlugin {
                 return true;
 
 
+            case "copyDebugReportToClipboard":
+
+                copyDebugReportToClipboard(
+                        callbackContext
+                );
+
+                return true;
+
+
             default:
 
                 return false;
+        }
+    }
+
+
+    // =============================================================
+    // Copy debug report to Android clipboard
+    // =============================================================
+
+    private void copyDebugReportToClipboard(
+            CallbackContext callbackContext
+    ) {
+
+        try {
+
+            String report =
+                    getPreferences().getString(
+                            PixelHouseNotificationService.KEY_DEBUG_REPORT,
+                            ""
+                    );
+
+
+            if (report.isEmpty()) {
+
+                callbackContext.error(
+                        "No debug report is available yet."
+                );
+
+                return;
+            }
+
+
+            Context context =
+                    cordova.getActivity();
+
+
+            ClipboardManager clipboardManager =
+                    (ClipboardManager) context.getSystemService(
+                            Context.CLIPBOARD_SERVICE
+                    );
+
+
+            if (clipboardManager == null) {
+
+                callbackContext.error(
+                        "Android clipboard service is not available."
+                );
+
+                return;
+            }
+
+
+            ClipData clipData =
+                    ClipData.newPlainText(
+                            "Message Wizard image diagnostic",
+                            report
+                    );
+
+
+            clipboardManager.setPrimaryClip(
+                    clipData
+            );
+
+
+            callbackContext.success(
+                    report.length()
+            );
+
+
+        } catch (Exception e) {
+
+            callbackContext.error(
+                    "Could not copy debug report: "
+                            + e.getMessage()
+            );
         }
     }
 

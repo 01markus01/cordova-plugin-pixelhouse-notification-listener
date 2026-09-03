@@ -1,6 +1,6 @@
 {
   "name": "cordova-plugin-pixelhouse-notification-listener",
-  "version": "0.3.0-diagnostic.1",
+  "version": "0.3.0-diagnostic.2",
   "description": "Pixel House Android notification listener plugin for Cordova and GDevelop with image notification diagnostics.",
   "cordova": {
     "id": "cordova-plugin-pixelhouse-notification-listener",
