@@ -4,6 +4,9 @@ import android.app.Notification;
 import android.app.Person;
 import android.content.ComponentName;
 import android.content.SharedPreferences;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
+import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Parcelable;
@@ -14,8 +17,11 @@ import android.util.Log;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
+import java.io.InputStream;
+import java.lang.reflect.Array;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Set;
@@ -66,6 +72,9 @@ public class PixelHouseNotificationService
 
     public static final String KEY_DEBUG_REPORT =
             "debug_report";
+
+    private static final int MAX_DEBUG_REPORT_CHARS =
+            120000;
 
 
     // =============================================================
@@ -1674,6 +1683,27 @@ public class PixelHouseNotificationService
 
 
             report.append(
+                    "PLUGIN VERSION:\n"
+                            + "0.3.0-diagnostic.1"
+                            + "\n\n"
+            );
+
+
+            report.append(
+                    "CAPTURED AT:\n"
+                            + System.currentTimeMillis()
+                            + "\n\n"
+            );
+
+
+            report.append(
+                    "ANDROID SDK:\n"
+                            + Build.VERSION.SDK_INT
+                            + "\n\n"
+            );
+
+
+            report.append(
                     "PACKAGE:\n"
                             + packageName
                             + "\n\n"
@@ -1746,6 +1776,41 @@ public class PixelHouseNotificationService
                     )
                             + "\n\n"
             );
+
+
+            report.append(
+                    "PLUGIN PROCESSING PATH:\n"
+                            + getDebugProcessingPath(
+                            packageName,
+                            notification
+                    )
+                            + "\n\n"
+            );
+
+
+            report.append(
+                    "CUSTOM CONTENT VIEW:\n"
+                            + (notification.contentView != null)
+                            + "\n\n"
+            );
+
+
+            report.append(
+                    "CUSTOM BIG CONTENT VIEW:\n"
+                            + (notification.bigContentView != null)
+                            + "\n\n"
+            );
+
+
+            if (Build.VERSION.SDK_INT
+                    >= Build.VERSION_CODES.LOLLIPOP) {
+
+                report.append(
+                        "CUSTOM HEADS-UP VIEW:\n"
+                                + (notification.headsUpContentView != null)
+                                + "\n\n"
+                );
+            }
 
 
             appendDebugField(
@@ -1871,31 +1936,61 @@ public class PixelHouseNotificationService
             );
 
 
-            report.append(
-                    "ALL EXTRA KEYS:\n"
+            appendImageAndMediaDebug(
+                    report,
+                    notification,
+                    extras
             );
 
 
-            for (String key : extras.keySet()) {
+            report.append(
+                    "ALL EXTRA KEYS AND VALUE TYPES:\n"
+            );
 
-                report.append(
-                        "- "
-                                + key
-                                + "\n"
-                );
+
+            ArrayList<String> extraKeys =
+                    new ArrayList<>(
+                            extras.keySet()
+                    );
+
+
+            Collections.sort(
+                    extraKeys
+            );
+
+
+            for (String key : extraKeys) {
+
+                try {
+
+                    report.append(
+                            "- "
+                                    + key
+                                    + ": "
+                                    + describeDebugValue(
+                                    extras.get(key)
+                            )
+                                    + "\n"
+                    );
+
+                } catch (Exception e) {
+
+                    report.append(
+                            "- "
+                                    + key
+                                    + ": <error reading value: "
+                                    + safeString(
+                                    e.getMessage()
+                            )
+                                    + ">\n"
+                    );
+                }
             }
 
 
-            getSharedPreferences(
-                    PREFS_NAME,
-                    MODE_PRIVATE
-            )
-                    .edit()
-                    .putString(
-                            KEY_DEBUG_REPORT,
-                            report.toString()
-                    )
-                    .apply();
+            appendStoredDebugReport(
+                    report.toString()
+            );
 
 
         } catch (Exception e) {
@@ -1906,6 +2001,486 @@ public class PixelHouseNotificationService
                     e
             );
         }
+    }
+
+
+    // =============================================================
+    // Debug processing path
+    // =============================================================
+
+    private String getDebugProcessingPath(
+            String packageName,
+            Notification notification
+    ) {
+
+        if (isWhatsAppPackage(
+                packageName
+        )) {
+
+            boolean isGroupSummary =
+                    (notification.flags
+                            & Notification.FLAG_GROUP_SUMMARY)
+                            != 0;
+
+
+            if (isGroupSummary) {
+
+                return "WhatsApp group summary: processed through EXTRA_TEXT_LINES.";
+            }
+
+
+            return "WhatsApp child notification: ignored by history, but included in this image diagnostic.";
+        }
+
+
+        return "Other messenger/app: MessagingStyle, then EXTRA_TEXT_LINES, then standard fallback.";
+    }
+
+
+    // =============================================================
+    // Debug image and media payloads
+    // =============================================================
+
+    private void appendImageAndMediaDebug(
+            StringBuilder report,
+            Notification notification,
+            Bundle extras
+    ) {
+
+        report.append(
+                "IMAGE AND MEDIA PAYLOADS:\n"
+        );
+
+
+        boolean foundAnyImageObject =
+                false;
+
+
+        boolean foundDedicatedPictureExtra =
+                false;
+
+
+        try {
+
+            if (Build.VERSION.SDK_INT
+                    >= Build.VERSION_CODES.M) {
+
+                Object largeIcon =
+                        notification.getLargeIcon();
+
+
+                appendDebugObject(
+                        report,
+                        "Notification.getLargeIcon()",
+                        largeIcon
+                );
+
+
+                foundAnyImageObject =
+                        foundAnyImageObject
+                                || largeIcon != null;
+            }
+
+        } catch (Exception e) {
+
+            report.append(
+                    "Notification.getLargeIcon(): <error: "
+                            + safeString(
+                            e.getMessage()
+                    )
+                            + ">\n"
+            );
+        }
+
+
+        try {
+
+            appendDebugObject(
+                    report,
+                    "Notification.largeIcon (legacy)",
+                    notification.largeIcon
+            );
+
+
+            foundAnyImageObject =
+                    foundAnyImageObject
+                            || notification.largeIcon != null;
+
+        } catch (Exception e) {
+
+            report.append(
+                    "Notification.largeIcon (legacy): <error: "
+                            + safeString(
+                            e.getMessage()
+                    )
+                            + ">\n"
+            );
+        }
+
+
+        String[] imageExtraKeys =
+                new String[]{
+                        "android.picture",
+                        "android.pictureIcon",
+                        "android.largeIcon",
+                        "android.largeIcon.big",
+                        "android.backgroundImageUri"
+                };
+
+
+        for (String key : imageExtraKeys) {
+
+            if (!extras.containsKey(
+                    key
+            )) {
+
+                report.append(
+                        key
+                                + ": <not present>\n"
+                );
+
+                continue;
+            }
+
+
+            try {
+
+                Object value =
+                        extras.get(key);
+
+
+                appendDebugObject(
+                        report,
+                        key,
+                        value
+                );
+
+
+                if (value instanceof Uri) {
+
+                    report.append(
+                            key
+                                    + " access test: "
+                                    + describeUriAccess(
+                                    (Uri) value
+                            )
+                                    + "\n"
+                    );
+                }
+
+
+                foundAnyImageObject =
+                        foundAnyImageObject
+                                || value != null;
+
+
+                if (value != null
+                        && (
+                        key.equals(
+                                "android.picture"
+                        )
+                                || key.equals(
+                                "android.pictureIcon"
+                        )
+                                || key.equals(
+                                "android.backgroundImageUri"
+                        )
+                )) {
+
+                    foundDedicatedPictureExtra =
+                            true;
+                }
+
+            } catch (Exception e) {
+
+                report.append(
+                        key
+                                + ": <error reading value: "
+                                + safeString(
+                                e.getMessage()
+                        )
+                                + ">\n"
+                );
+            }
+        }
+
+
+        report.append(
+                "Any icon/image object found: "
+                        + foundAnyImageObject
+                        + "\n"
+        );
+
+
+        report.append(
+                "Dedicated picture extra found: "
+                        + foundDedicatedPictureExtra
+                        + "\n\n"
+        );
+    }
+
+
+    private void appendDebugObject(
+            StringBuilder report,
+            String name,
+            Object value
+    ) {
+
+        report.append(
+                name
+                        + ": "
+                        + describeDebugValue(
+                        value
+                )
+                        + "\n"
+        );
+    }
+
+
+    private String describeDebugValue(
+            Object value
+    ) {
+
+        if (value == null) {
+
+            return "<null>";
+        }
+
+
+        if (value instanceof Bitmap) {
+
+            Bitmap bitmap =
+                    (Bitmap) value;
+
+
+            String allocationBytes =
+                    "unknown";
+
+
+            try {
+
+                allocationBytes =
+                        String.valueOf(
+                                bitmap.getAllocationByteCount()
+                        );
+
+            } catch (Exception ignored) {
+            }
+
+
+            return "android.graphics.Bitmap"
+                    + " width="
+                    + bitmap.getWidth()
+                    + " height="
+                    + bitmap.getHeight()
+                    + " allocationBytes="
+                    + allocationBytes
+                    + " config="
+                    + String.valueOf(
+                    bitmap.getConfig()
+            )
+                    + " hasAlpha="
+                    + bitmap.hasAlpha();
+        }
+
+
+        if (value instanceof Uri) {
+
+            Uri uri =
+                    (Uri) value;
+
+
+            return "android.net.Uri"
+                    + " scheme="
+                    + safeString(
+                    uri.getScheme()
+            )
+                    + " authority="
+                    + safeString(
+                    uri.getAuthority()
+            )
+                    + " value="
+                    + limitDebugText(
+                    uri.toString(),
+                    500
+            );
+        }
+
+
+        if (value instanceof Bundle) {
+
+            Bundle bundle =
+                    (Bundle) value;
+
+
+            return "android.os.Bundle"
+                    + " keys="
+                    + bundle.keySet();
+        }
+
+
+        Class<?> valueClass =
+                value.getClass();
+
+
+        if (valueClass.isArray()) {
+
+            int length =
+                    Array.getLength(
+                            value
+                    );
+
+
+            StringBuilder arrayDescription =
+                    new StringBuilder();
+
+
+            arrayDescription.append(
+                    valueClass.getName()
+                            + " length="
+                            + length
+            );
+
+
+            int inspectedItems =
+                    Math.min(
+                            length,
+                            12
+                    );
+
+
+            for (
+                    int i = 0;
+                    i < inspectedItems;
+                    i++
+            ) {
+
+                Object item =
+                        Array.get(
+                                value,
+                                i
+                        );
+
+
+                arrayDescription.append(
+                        " ["
+                                + i
+                                + "]="
+                                + (
+                                item == null
+                                        ? "null"
+                                        : item.getClass().getName()
+                        )
+                );
+            }
+
+
+            if (length > inspectedItems) {
+
+                arrayDescription.append(
+                        " ..."
+                );
+            }
+
+
+            return arrayDescription.toString();
+        }
+
+
+        return valueClass.getName()
+                + " value="
+                + limitDebugText(
+                String.valueOf(
+                        value
+                ),
+                500
+        );
+    }
+
+
+    private String limitDebugText(
+            String value,
+            int maxLength
+    ) {
+
+        String safeValue =
+                safeString(
+                        value
+                );
+
+
+        if (safeValue.length()
+                <= maxLength) {
+
+            return safeValue;
+        }
+
+
+        return safeValue.substring(
+                0,
+                maxLength
+        )
+                + "...";
+    }
+
+
+    // =============================================================
+    // Keep several reports so WhatsApp child and group notifications
+    // can be compared after one test message.
+    // =============================================================
+
+    private void appendStoredDebugReport(
+            String newestReport
+    ) {
+
+        SharedPreferences preferences =
+                getSharedPreferences(
+                        PREFS_NAME,
+                        MODE_PRIVATE
+                );
+
+
+        String previousReports =
+                preferences.getString(
+                        KEY_DEBUG_REPORT,
+                        ""
+                );
+
+
+        String combinedReport =
+                newestReport;
+
+
+        if (!previousReports.isEmpty()) {
+
+            combinedReport =
+                    newestReport
+                            + "\n\n\n"
+                            + "################################\n"
+                            + "OLDER CAPTURE FOLLOWS\n"
+                            + "################################\n\n"
+                            + previousReports;
+        }
+
+
+        if (combinedReport.length()
+                > MAX_DEBUG_REPORT_CHARS) {
+
+            combinedReport =
+                    combinedReport.substring(
+                            0,
+                            MAX_DEBUG_REPORT_CHARS
+                    );
+        }
+
+
+        preferences
+                .edit()
+                .putString(
+                        KEY_DEBUG_REPORT,
+                        combinedReport
+                )
+                .apply();
     }
 
 
@@ -2044,6 +2619,84 @@ public class PixelHouseNotificationService
                                 + message.getTimestamp()
                                 + "\n"
                 );
+
+
+                if (Build.VERSION.SDK_INT
+                        >= Build.VERSION_CODES.P) {
+
+                    String dataMimeType =
+                            safeString(
+                                    message.getDataMimeType()
+                            );
+
+
+                    Uri dataUri =
+                            message.getDataUri();
+
+
+                    report.append(
+                            "Data MIME type: "
+                                    + (
+                                    dataMimeType.isEmpty()
+                                            ? "<none>"
+                                            : dataMimeType
+                            )
+                                    + "\n"
+                    );
+
+
+                    report.append(
+                            "Data URI: "
+                                    + (
+                                    dataUri == null
+                                            ? "<none>"
+                                            : describeDebugValue(
+                                            dataUri
+                                    )
+                            )
+                                    + "\n"
+                    );
+
+
+                    if (dataUri != null) {
+
+                        report.append(
+                                "Data URI access test: "
+                                        + describeUriAccess(
+                                        dataUri
+                                )
+                                        + "\n"
+                        );
+                    }
+                }
+
+
+                Parcelable rawMessage =
+                        bundles[i];
+
+
+                if (rawMessage instanceof Bundle) {
+
+                    appendRawMessageBundleDebug(
+                            report,
+                            (Bundle) rawMessage
+                    );
+
+                } else {
+
+                    report.append(
+                            "Raw message value: "
+                                    + describeDebugValue(
+                                    rawMessage
+                            )
+                                    + "\n"
+                    );
+                }
+
+
+                report.append(
+                        "\n"
+                );
             }
 
 
@@ -2058,6 +2711,176 @@ public class PixelHouseNotificationService
                     "<error>\n\n"
             );
         }
+    }
+
+
+    private void appendRawMessageBundleDebug(
+            StringBuilder report,
+            Bundle messageBundle
+    ) {
+
+        report.append(
+                "Raw message bundle values:\n"
+        );
+
+
+        ArrayList<String> keys =
+                new ArrayList<>(
+                        messageBundle.keySet()
+                );
+
+
+        Collections.sort(
+                keys
+        );
+
+
+        for (String key : keys) {
+
+            try {
+
+                report.append(
+                        "  - "
+                                + key
+                                + ": "
+                                + describeDebugValue(
+                                messageBundle.get(key)
+                        )
+                                + "\n"
+                );
+
+            } catch (Exception e) {
+
+                report.append(
+                        "  - "
+                                + key
+                                + ": <error reading value: "
+                                + safeString(
+                                e.getMessage()
+                        )
+                                + ">\n"
+                );
+            }
+        }
+    }
+
+
+    private String describeUriAccess(
+            Uri uri
+    ) {
+
+        StringBuilder result =
+                new StringBuilder();
+
+
+        try {
+
+            String resolverMimeType =
+                    getContentResolver()
+                            .getType(
+                                    uri
+                            );
+
+
+            result.append(
+                    "resolverMimeType="
+                            + (
+                            resolverMimeType == null
+                                    ? "<unknown>"
+                                    : resolverMimeType
+                    )
+                            + " "
+            );
+
+        } catch (Exception e) {
+
+            result.append(
+                    "resolverMimeTypeError="
+                            + safeString(
+                            e.getMessage()
+                    )
+                            + " "
+            );
+        }
+
+
+        InputStream inputStream =
+                null;
+
+
+        try {
+
+            inputStream =
+                    getContentResolver()
+                            .openInputStream(
+                                    uri
+                            );
+
+
+            if (inputStream == null) {
+
+                result.append(
+                        "readable=false stream=<null>"
+                );
+
+                return result.toString();
+            }
+
+
+            BitmapFactory.Options options =
+                    new BitmapFactory.Options();
+
+
+            options.inJustDecodeBounds =
+                    true;
+
+
+            BitmapFactory.decodeStream(
+                    inputStream,
+                    null,
+                    options
+            );
+
+
+            result.append(
+                    "readable=true"
+                            + " width="
+                            + options.outWidth
+                            + " height="
+                            + options.outHeight
+                            + " decodedMimeType="
+                            + safeString(
+                            options.outMimeType
+                    )
+            );
+
+
+        } catch (Exception e) {
+
+            result.append(
+                    "readable=false error="
+                            + e.getClass().getName()
+                            + ":"
+                            + safeString(
+                            e.getMessage()
+                    )
+            );
+
+        } finally {
+
+            if (inputStream != null) {
+
+                try {
+
+                    inputStream.close();
+
+                } catch (Exception ignored) {
+                }
+            }
+        }
+
+
+        return result.toString();
     }
 
 
