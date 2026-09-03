@@ -3,6 +3,7 @@ package com.pixelhouse.notificationlistener;
 import android.app.Notification;
 import android.app.Person;
 import android.content.ComponentName;
+import android.content.Context;
 import android.content.SharedPreferences;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
@@ -17,6 +18,8 @@ import android.util.Log;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
+import java.io.File;
+import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.lang.reflect.Array;
 import java.nio.charset.StandardCharsets;
@@ -73,8 +76,29 @@ public class PixelHouseNotificationService
     public static final String KEY_DEBUG_REPORT =
             "debug_report";
 
+    public static final String KEY_PENDING_NOTIFICATION_IMAGES_PREFIX =
+            "pending_notification_images::";
+
+    public static final String IMAGE_DIRECTORY_NAME =
+            "notification_images";
+
     private static final int MAX_DEBUG_REPORT_CHARS =
             120000;
+
+    private static final int MAX_PENDING_NOTIFICATION_IMAGES =
+            50;
+
+    private static final int MAX_STORED_IMAGE_DIMENSION =
+            1600;
+
+    private static final int STORED_IMAGE_JPEG_QUALITY =
+            82;
+
+    private static final long IMAGE_HISTORY_MATCH_WINDOW_MS =
+            120000;
+
+    private static final long PENDING_IMAGE_MAX_AGE_MS =
+            600000;
 
 
     // =============================================================
@@ -209,6 +233,22 @@ public class PixelHouseNotificationService
 
 
         // =========================================================
+        // Capture MessagingStyle image data immediately.
+        //
+        // WhatsApp and Signal can publish the text first and add the
+        // temporary content:// image URI in a later update. The URI
+        // must be copied while the notification grants access to it.
+        // This step never creates a history message by itself.
+        // =========================================================
+
+        captureMessagingStyleImages(
+                sbn,
+                extras,
+                packageName
+        );
+
+
+        // =========================================================
         // Debug report
         // =========================================================
 
@@ -240,8 +280,10 @@ public class PixelHouseNotificationService
         // WhatsApp also creates child notifications. These caused
         // duplicate history entries.
         //
-        // Therefore WhatsApp child notifications are ignored and
-        // only the GROUP SUMMARY is processed.
+        // Therefore WhatsApp child notifications are ignored for
+        // text history. Their MessagingStyle image URIs were already
+        // handled above so they can enrich the summary history entry
+        // without creating duplicates.
         // =========================================================
 
         if (isWhatsAppPackage(
@@ -395,6 +437,1606 @@ public class PixelHouseNotificationService
 
 
     // =============================================================
+    // MessagingStyle image capture
+    // =============================================================
+
+    private void captureMessagingStyleImages(
+            StatusBarNotification sbn,
+            Bundle extras,
+            String packageName
+    ) {
+
+        if (Build.VERSION.SDK_INT
+                < Build.VERSION_CODES.P) {
+
+            return;
+        }
+
+
+        try {
+
+            Parcelable[] messageBundles =
+                    extras.getParcelableArray(
+                            Notification.EXTRA_MESSAGES
+                    );
+
+
+            if (messageBundles == null
+                    || messageBundles.length == 0) {
+
+                return;
+            }
+
+
+            List<Notification.MessagingStyle.Message> messages =
+                    Notification.MessagingStyle.Message
+                            .getMessagesFromBundleArray(
+                                    messageBundles
+                            );
+
+
+            if (messages == null
+                    || messages.isEmpty()) {
+
+                return;
+            }
+
+
+            String conversationTitle =
+                    getConversationTitle(
+                            extras
+                    );
+
+
+            String notificationKey =
+                    safeString(
+                            sbn.getKey()
+                    );
+
+
+            for (
+                    Notification.MessagingStyle.Message message
+                    : messages
+            ) {
+
+                if (message == null) {
+                    continue;
+                }
+
+
+                String mimeType =
+                        safeString(
+                                message.getDataMimeType()
+                        ).trim();
+
+
+                Uri dataUri =
+                        message.getDataUri();
+
+
+                if (!isImageMimeType(
+                        mimeType
+                )
+                        || dataUri == null) {
+
+                    continue;
+                }
+
+
+                String text =
+                        safeCharSequence(
+                                message.getText()
+                        ).trim();
+
+
+                String sender =
+                        getMessageSender(
+                                message
+                        );
+
+
+                if (sender.isEmpty()) {
+                    sender = conversationTitle;
+                }
+
+
+                long messageTimestamp =
+                        message.getTimestamp();
+
+
+                if (messageTimestamp <= 0) {
+                    messageTimestamp = sbn.getPostTime();
+                }
+
+
+                if (messageTimestamp <= 0) {
+                    messageTimestamp = System.currentTimeMillis();
+                }
+
+
+                StoredImage storedImage =
+                        storeNotificationImage(
+                                packageName,
+                                sender,
+                                text,
+                                messageTimestamp,
+                                dataUri
+                        );
+
+
+                if (storedImage == null) {
+                    continue;
+                }
+
+
+                String fingerprint =
+                        createMessageFingerprint(
+                                packageName,
+                                notificationKey,
+                                sender,
+                                text,
+                                messageTimestamp
+                        );
+
+
+                boolean attached =
+                        attachImageToHistoryByFingerprint(
+                                packageName,
+                                fingerprint,
+                                storedImage
+                        );
+
+
+                if (!attached
+                        && isWhatsAppPackage(
+                        packageName
+                )) {
+
+                    attached =
+                            attachImageToBestHistoryMatch(
+                                    packageName,
+                                    sender,
+                                    text,
+                                    messageTimestamp,
+                                    storedImage
+                            );
+                }
+
+
+                if (!attached) {
+
+                    savePendingImage(
+                            packageName,
+                            sender,
+                            text,
+                            messageTimestamp,
+                            storedImage
+                    );
+                }
+            }
+
+
+        } catch (Exception e) {
+
+            Log.e(
+                    TAG,
+                    "Could not capture MessagingStyle image",
+                    e
+            );
+        }
+    }
+
+
+    private boolean isImageMimeType(
+            String mimeType
+    ) {
+
+        return mimeType != null
+                && mimeType.regionMatches(
+                true,
+                0,
+                "image/",
+                0,
+                6
+        );
+    }
+
+
+    private StoredImage storeNotificationImage(
+            String packageName,
+            String sender,
+            String text,
+            long timestamp,
+            Uri dataUri
+    ) {
+
+        String fileName =
+                createImageFileName(
+                        packageName,
+                        sender,
+                        text,
+                        timestamp
+                );
+
+
+        File imageDirectory =
+                getImageDirectory(
+                        this
+                );
+
+
+        if (!imageDirectory.exists()
+                && !imageDirectory.mkdirs()) {
+
+            Log.e(
+                    TAG,
+                    "Could not create notification image directory"
+            );
+
+            return null;
+        }
+
+
+        File targetFile =
+                new File(
+                        imageDirectory,
+                        fileName
+                );
+
+
+        if (targetFile.isFile()
+                && targetFile.length() > 0) {
+
+            return readStoredImageInfo(
+                    targetFile,
+                    fileName
+            );
+        }
+
+
+        Bitmap originalBitmap = null;
+        Bitmap storedBitmap = null;
+
+
+        try {
+
+            BitmapFactory.Options bounds =
+                    new BitmapFactory.Options();
+
+            bounds.inJustDecodeBounds = true;
+
+
+            try (
+                    InputStream boundsStream =
+                            getContentResolver()
+                                    .openInputStream(
+                                            dataUri
+                                    )
+            ) {
+
+                if (boundsStream != null) {
+
+                    BitmapFactory.decodeStream(
+                            boundsStream,
+                            null,
+                            bounds
+                    );
+                }
+            }
+
+
+            BitmapFactory.Options decodeOptions =
+                    new BitmapFactory.Options();
+
+            decodeOptions.inSampleSize =
+                    calculateImageSampleSize(
+                            bounds.outWidth,
+                            bounds.outHeight
+                    );
+
+
+            try (
+                    InputStream imageStream =
+                            getContentResolver()
+                                    .openInputStream(
+                                            dataUri
+                                    )
+            ) {
+
+                if (imageStream == null) {
+                    return null;
+                }
+
+
+                originalBitmap =
+                        BitmapFactory.decodeStream(
+                                imageStream,
+                                null,
+                                decodeOptions
+                        );
+            }
+
+
+            if (originalBitmap == null) {
+                return null;
+            }
+
+
+            storedBitmap =
+                    scaleBitmapToMaximumDimension(
+                            originalBitmap,
+                            MAX_STORED_IMAGE_DIMENSION
+                    );
+
+
+            try (
+                    FileOutputStream outputStream =
+                            new FileOutputStream(
+                                    targetFile,
+                                    false
+                            )
+            ) {
+
+                boolean compressed =
+                        storedBitmap.compress(
+                                Bitmap.CompressFormat.JPEG,
+                                STORED_IMAGE_JPEG_QUALITY,
+                                outputStream
+                        );
+
+
+                outputStream.flush();
+
+
+                if (!compressed) {
+
+                    deleteFileQuietly(
+                            targetFile
+                    );
+
+                    return null;
+                }
+            }
+
+
+            if (!targetFile.isFile()
+                    || targetFile.length() <= 0) {
+
+                deleteFileQuietly(
+                        targetFile
+                );
+
+                return null;
+            }
+
+
+            Log.d(
+                    TAG,
+                    "Stored notification image: "
+                            + fileName
+            );
+
+
+            return new StoredImage(
+                    fileName,
+                    "image/jpeg",
+                    storedBitmap.getWidth(),
+                    storedBitmap.getHeight(),
+                    targetFile.length(),
+                    System.currentTimeMillis()
+            );
+
+
+        } catch (Exception e) {
+
+            deleteFileQuietly(
+                    targetFile
+            );
+
+
+            Log.e(
+                    TAG,
+                    "Could not store notification image",
+                    e
+            );
+
+
+            return null;
+
+
+        } finally {
+
+            if (storedBitmap != null
+                    && storedBitmap != originalBitmap
+                    && !storedBitmap.isRecycled()) {
+
+                storedBitmap.recycle();
+            }
+
+
+            if (originalBitmap != null
+                    && !originalBitmap.isRecycled()) {
+
+                originalBitmap.recycle();
+            }
+        }
+    }
+
+
+    private int calculateImageSampleSize(
+            int width,
+            int height
+    ) {
+
+        int sampleSize = 1;
+
+
+        while (width > 0
+                && height > 0
+                && (
+                width / sampleSize
+                        > MAX_STORED_IMAGE_DIMENSION * 2
+                        || height / sampleSize
+                        > MAX_STORED_IMAGE_DIMENSION * 2
+        )) {
+
+            sampleSize *= 2;
+        }
+
+
+        return sampleSize;
+    }
+
+
+    private Bitmap scaleBitmapToMaximumDimension(
+            Bitmap bitmap,
+            int maximumDimension
+    ) {
+
+        int width =
+                bitmap.getWidth();
+
+        int height =
+                bitmap.getHeight();
+
+
+        int largestDimension =
+                Math.max(
+                        width,
+                        height
+                );
+
+
+        if (largestDimension <= maximumDimension) {
+            return bitmap;
+        }
+
+
+        float scale =
+                (float) maximumDimension
+                        / (float) largestDimension;
+
+
+        int scaledWidth =
+                Math.max(
+                        1,
+                        Math.round(
+                                width * scale
+                        )
+                );
+
+        int scaledHeight =
+                Math.max(
+                        1,
+                        Math.round(
+                                height * scale
+                        )
+                );
+
+
+        return Bitmap.createScaledBitmap(
+                bitmap,
+                scaledWidth,
+                scaledHeight,
+                true
+        );
+    }
+
+
+    private StoredImage readStoredImageInfo(
+            File file,
+            String fileName
+    ) {
+
+        try {
+
+            BitmapFactory.Options bounds =
+                    new BitmapFactory.Options();
+
+            bounds.inJustDecodeBounds = true;
+
+
+            BitmapFactory.decodeFile(
+                    file.getAbsolutePath(),
+                    bounds
+            );
+
+
+            return new StoredImage(
+                    fileName,
+                    "image/jpeg",
+                    Math.max(
+                            0,
+                            bounds.outWidth
+                    ),
+                    Math.max(
+                            0,
+                            bounds.outHeight
+                    ),
+                    file.length(),
+                    file.lastModified()
+            );
+
+
+        } catch (Exception e) {
+
+            return null;
+        }
+    }
+
+
+    private String createImageFileName(
+            String packageName,
+            String sender,
+            String text,
+            long timestamp
+    ) {
+
+        return sha256(
+                packageName
+                        + "|media|"
+                        + sender
+                        + "|"
+                        + text
+                        + "|"
+                        + timestamp
+        )
+                + ".jpg";
+    }
+
+
+    private synchronized boolean attachImageToHistoryByFingerprint(
+            String packageName,
+            String fingerprint,
+            StoredImage storedImage
+    ) {
+
+        try {
+
+            SharedPreferences prefs =
+                    getSharedPreferences(
+                            PREFS_NAME,
+                            MODE_PRIVATE
+                    );
+
+
+            JSONArray history =
+                    getStoredHistory(
+                            prefs,
+                            packageName
+                    );
+
+
+            for (
+                    int i = history.length() - 1;
+                    i >= 0;
+                    i--
+            ) {
+
+                JSONObject entry =
+                        history.optJSONObject(i);
+
+
+                if (entry == null
+                        || !fingerprint.equals(
+                        entry.optString(
+                                "fingerprint",
+                                ""
+                        )
+                )) {
+
+                    continue;
+                }
+
+
+                applyImageMetadata(
+                        entry,
+                        storedImage
+                );
+
+
+                saveStoredHistory(
+                        prefs,
+                        packageName,
+                        history
+                );
+
+
+                return true;
+            }
+
+
+        } catch (Exception e) {
+
+            Log.e(
+                    TAG,
+                    "Could not attach image by fingerprint",
+                    e
+            );
+        }
+
+
+        return false;
+    }
+
+
+    private synchronized boolean attachImageToBestHistoryMatch(
+            String packageName,
+            String sender,
+            String text,
+            long messageTimestamp,
+            StoredImage storedImage
+    ) {
+
+        try {
+
+            SharedPreferences prefs =
+                    getSharedPreferences(
+                            PREFS_NAME,
+                            MODE_PRIVATE
+                    );
+
+
+            JSONArray history =
+                    getStoredHistory(
+                            prefs,
+                            packageName
+                    );
+
+
+            int bestIndex = -1;
+            long bestScore = Long.MAX_VALUE;
+
+
+            for (
+                    int i = history.length() - 1;
+                    i >= 0;
+                    i--
+            ) {
+
+                JSONObject entry =
+                        history.optJSONObject(i);
+
+
+                if (entry == null
+                        || !historyTextMatchesImage(
+                        entry.optString(
+                                "text",
+                                ""
+                        ),
+                        text,
+                        sender
+                )) {
+
+                    continue;
+                }
+
+
+                String existingImageFile =
+                        entry.optString(
+                                "imageFileName",
+                                ""
+                        );
+
+
+                if (storedImage.fileName.equals(
+                        existingImageFile
+                )) {
+
+                    return true;
+                }
+
+
+                if (!existingImageFile.isEmpty()) {
+                    continue;
+                }
+
+
+                long difference =
+                        Math.abs(
+                                entry.optLong(
+                                        "timestamp",
+                                        0
+                                )
+                                        - messageTimestamp
+                        );
+
+
+                if (difference
+                        > IMAGE_HISTORY_MATCH_WINDOW_MS) {
+
+                    continue;
+                }
+
+
+                boolean sameSender =
+                        sender.equals(
+                                entry.optString(
+                                        "title",
+                                        ""
+                                )
+                        );
+
+
+                long score =
+                        difference
+                                + (
+                                sameSender
+                                        ? 0
+                                        : IMAGE_HISTORY_MATCH_WINDOW_MS
+                        );
+
+
+                if (score < bestScore) {
+
+                    bestScore = score;
+                    bestIndex = i;
+                }
+            }
+
+
+            if (bestIndex < 0) {
+                return false;
+            }
+
+
+            JSONObject matchedEntry =
+                    history.getJSONObject(
+                            bestIndex
+                    );
+
+
+            applyImageMetadata(
+                    matchedEntry,
+                    storedImage
+            );
+
+
+            saveStoredHistory(
+                    prefs,
+                    packageName,
+                    history
+            );
+
+
+            return true;
+
+
+        } catch (Exception e) {
+
+            Log.e(
+                    TAG,
+                    "Could not attach image to matching history entry",
+                    e
+            );
+
+
+            return false;
+        }
+    }
+
+
+    private synchronized void savePendingImage(
+            String packageName,
+            String sender,
+            String text,
+            long messageTimestamp,
+            StoredImage storedImage
+    ) {
+
+        try {
+
+            SharedPreferences prefs =
+                    getSharedPreferences(
+                            PREFS_NAME,
+                            MODE_PRIVATE
+                    );
+
+
+            JSONArray current =
+                    getPendingImages(
+                            prefs,
+                            packageName
+                    );
+
+
+            JSONArray updated =
+                    new JSONArray();
+
+
+            long now =
+                    System.currentTimeMillis();
+
+
+            boolean alreadyPresent = false;
+
+
+            for (
+                    int i = 0;
+                    i < current.length();
+                    i++
+            ) {
+
+                JSONObject pending =
+                        current.optJSONObject(i);
+
+
+                if (pending == null) {
+                    continue;
+                }
+
+
+                String pendingFileName =
+                        pending.optString(
+                                "imageFileName",
+                                ""
+                        );
+
+
+                long capturedAt =
+                        pending.optLong(
+                                "imageCapturedAt",
+                                0
+                        );
+
+
+                if (capturedAt <= 0
+                        || now - capturedAt
+                        > PENDING_IMAGE_MAX_AGE_MS) {
+
+                    deleteStoredImageFile(
+                            this,
+                            pendingFileName
+                    );
+
+                    continue;
+                }
+
+
+                if (storedImage.fileName.equals(
+                        pendingFileName
+                )) {
+
+                    alreadyPresent = true;
+                }
+
+
+                updated.put(
+                        pending
+                );
+            }
+
+
+            if (!alreadyPresent) {
+
+                JSONObject pending =
+                        new JSONObject();
+
+
+                pending.put(
+                        "sender",
+                        sender
+                );
+
+                pending.put(
+                        "text",
+                        text
+                );
+
+                pending.put(
+                        "messageTimestamp",
+                        messageTimestamp
+                );
+
+
+                applyImageMetadata(
+                        pending,
+                        storedImage
+                );
+
+
+                updated.put(
+                        pending
+                );
+            }
+
+
+            while (updated.length()
+                    > MAX_PENDING_NOTIFICATION_IMAGES) {
+
+                JSONObject removed =
+                        updated.optJSONObject(0);
+
+
+                if (removed != null) {
+
+                    deleteStoredImageFile(
+                            this,
+                            removed.optString(
+                                    "imageFileName",
+                                    ""
+                            )
+                    );
+                }
+
+
+                updated =
+                        removeJsonArrayIndex(
+                                updated,
+                                0
+                        );
+            }
+
+
+            savePendingImages(
+                    prefs,
+                    packageName,
+                    updated
+            );
+
+
+        } catch (Exception e) {
+
+            Log.e(
+                    TAG,
+                    "Could not save pending notification image",
+                    e
+            );
+        }
+    }
+
+
+    private synchronized void attachPendingImageToHistoryEntry(
+            String packageName,
+            String fingerprint,
+            String title,
+            String text,
+            long historyTimestamp
+    ) {
+
+        try {
+
+            SharedPreferences prefs =
+                    getSharedPreferences(
+                            PREFS_NAME,
+                            MODE_PRIVATE
+                    );
+
+
+            JSONArray pendingImages =
+                    getPendingImages(
+                            prefs,
+                            packageName
+                    );
+
+
+            if (pendingImages.length() == 0) {
+                return;
+            }
+
+
+            int bestPendingIndex = -1;
+            long bestScore = Long.MAX_VALUE;
+            long now = System.currentTimeMillis();
+
+
+            for (
+                    int i = 0;
+                    i < pendingImages.length();
+                    i++
+            ) {
+
+                JSONObject pending =
+                        pendingImages.optJSONObject(i);
+
+
+                if (pending == null
+                        || !historyTextMatchesImage(
+                        text,
+                        pending.optString(
+                                "text",
+                                ""
+                        ),
+                        pending.optString(
+                                "sender",
+                                ""
+                        )
+                )) {
+
+                    continue;
+                }
+
+
+                long capturedAt =
+                        pending.optLong(
+                                "imageCapturedAt",
+                                0
+                        );
+
+
+                if (capturedAt <= 0
+                        || now - capturedAt
+                        > PENDING_IMAGE_MAX_AGE_MS) {
+
+                    continue;
+                }
+
+
+                long difference =
+                        Math.abs(
+                                pending.optLong(
+                                        "messageTimestamp",
+                                        0
+                                )
+                                        - historyTimestamp
+                        );
+
+
+                if (difference
+                        > IMAGE_HISTORY_MATCH_WINDOW_MS) {
+
+                    continue;
+                }
+
+
+                boolean sameSender =
+                        title.equals(
+                                pending.optString(
+                                        "sender",
+                                        ""
+                                )
+                        );
+
+
+                long score =
+                        difference
+                                + (
+                                sameSender
+                                        ? 0
+                                        : IMAGE_HISTORY_MATCH_WINDOW_MS
+                        );
+
+
+                if (score < bestScore) {
+
+                    bestScore = score;
+                    bestPendingIndex = i;
+                }
+            }
+
+
+            if (bestPendingIndex < 0) {
+
+                cleanupExpiredPendingImages(
+                        prefs,
+                        packageName,
+                        pendingImages,
+                        now
+                );
+
+                return;
+            }
+
+
+            JSONObject selectedPending =
+                    pendingImages.getJSONObject(
+                            bestPendingIndex
+                    );
+
+
+            StoredImage storedImage =
+                    StoredImage.fromJson(
+                            selectedPending
+                    );
+
+
+            if (storedImage == null) {
+                return;
+            }
+
+
+            JSONArray history =
+                    getStoredHistory(
+                            prefs,
+                            packageName
+                    );
+
+
+            boolean attached = false;
+
+
+            for (
+                    int i = history.length() - 1;
+                    i >= 0;
+                    i--
+            ) {
+
+                JSONObject entry =
+                        history.optJSONObject(i);
+
+
+                if (entry != null
+                        && fingerprint.equals(
+                        entry.optString(
+                                "fingerprint",
+                                ""
+                        )
+                )) {
+
+                    applyImageMetadata(
+                            entry,
+                            storedImage
+                    );
+
+
+                    attached = true;
+                    break;
+                }
+            }
+
+
+            if (!attached) {
+                return;
+            }
+
+
+            saveStoredHistory(
+                    prefs,
+                    packageName,
+                    history
+            );
+
+
+            JSONArray remainingPending =
+                    removeJsonArrayIndex(
+                            pendingImages,
+                            bestPendingIndex
+                    );
+
+
+            cleanupExpiredPendingImages(
+                    prefs,
+                    packageName,
+                    remainingPending,
+                    now
+            );
+
+
+        } catch (Exception e) {
+
+            Log.e(
+                    TAG,
+                    "Could not attach pending notification image",
+                    e
+            );
+        }
+    }
+
+
+    private boolean historyTextMatchesImage(
+            String historyText,
+            String messageText,
+            String sender
+    ) {
+
+        if (historyText.equals(
+                messageText
+        )) {
+
+            return true;
+        }
+
+
+        if (messageText.isEmpty()) {
+            return false;
+        }
+
+
+        String senderPrefix =
+                sender.isEmpty()
+                        ? ""
+                        : sender
+                        + ": ";
+
+
+        if (!senderPrefix.isEmpty()
+                && historyText.equals(
+                senderPrefix
+                        + messageText
+        )) {
+
+            return true;
+        }
+
+
+        return historyText.endsWith(
+                ": "
+                        + messageText
+        );
+    }
+
+
+    private JSONArray getPendingImages(
+            SharedPreferences prefs,
+            String packageName
+    ) {
+
+        try {
+
+            return new JSONArray(
+                    prefs.getString(
+                            getPendingImagesPreferenceKey(
+                                    packageName
+                            ),
+                            "[]"
+                    )
+            );
+
+
+        } catch (Exception e) {
+
+            return new JSONArray();
+        }
+    }
+
+
+    private void savePendingImages(
+            SharedPreferences prefs,
+            String packageName,
+            JSONArray pendingImages
+    ) {
+
+        prefs.edit()
+                .putString(
+                        getPendingImagesPreferenceKey(
+                                packageName
+                        ),
+                        pendingImages.toString()
+                )
+                .apply();
+    }
+
+
+    private void cleanupExpiredPendingImages(
+            SharedPreferences prefs,
+            String packageName,
+            JSONArray pendingImages,
+            long now
+    ) {
+
+        JSONArray remaining =
+                new JSONArray();
+
+
+        for (
+                int i = 0;
+                i < pendingImages.length();
+                i++
+        ) {
+
+            JSONObject pending =
+                    pendingImages.optJSONObject(i);
+
+
+            if (pending == null) {
+                continue;
+            }
+
+
+            long capturedAt =
+                    pending.optLong(
+                            "imageCapturedAt",
+                            0
+                    );
+
+
+            if (capturedAt <= 0
+                    || now - capturedAt
+                    > PENDING_IMAGE_MAX_AGE_MS) {
+
+                deleteStoredImageFile(
+                        this,
+                        pending.optString(
+                                "imageFileName",
+                                ""
+                        )
+                );
+
+                continue;
+            }
+
+
+            remaining.put(
+                    pending
+            );
+        }
+
+
+        savePendingImages(
+                prefs,
+                packageName,
+                remaining
+        );
+    }
+
+
+    private JSONArray removeJsonArrayIndex(
+            JSONArray source,
+            int indexToRemove
+    ) {
+
+        JSONArray result =
+                new JSONArray();
+
+
+        for (
+                int i = 0;
+                i < source.length();
+                i++
+        ) {
+
+            if (i != indexToRemove) {
+
+                result.put(
+                        source.opt(i)
+                );
+            }
+        }
+
+
+        return result;
+    }
+
+
+    private void applyImageMetadata(
+            JSONObject target,
+            StoredImage storedImage
+    ) throws Exception {
+
+        target.put(
+                "hasImage",
+                true
+        );
+
+        target.put(
+                "imageFileName",
+                storedImage.fileName
+        );
+
+        target.put(
+                "imageMimeType",
+                storedImage.mimeType
+        );
+
+        target.put(
+                "imageWidth",
+                storedImage.width
+        );
+
+        target.put(
+                "imageHeight",
+                storedImage.height
+        );
+
+        target.put(
+                "imageSizeBytes",
+                storedImage.sizeBytes
+        );
+
+        target.put(
+                "imageCapturedAt",
+                storedImage.capturedAt
+        );
+    }
+
+
+    private void saveStoredHistory(
+            SharedPreferences prefs,
+            String packageName,
+            JSONArray history
+    ) {
+
+        prefs.edit()
+                .putString(
+                        getHistoryPreferenceKey(
+                                packageName
+                        ),
+                        history.toString()
+                )
+                .apply();
+    }
+
+
+    public static String getPendingImagesPreferenceKey(
+            String packageName
+    ) {
+
+        String safePackage =
+                packageName == null
+                        ? ""
+                        : packageName.trim();
+
+
+        return KEY_PENDING_NOTIFICATION_IMAGES_PREFIX
+                + safePackage;
+    }
+
+
+    public static File getImageDirectory(
+            Context context
+    ) {
+
+        return new File(
+                context.getFilesDir(),
+                IMAGE_DIRECTORY_NAME
+        );
+    }
+
+
+    public static boolean deleteStoredImageFile(
+            Context context,
+            String fileName
+    ) {
+
+        if (context == null
+                || fileName == null
+                || fileName.isEmpty()
+                || !fileName.equals(
+                new File(
+                        fileName
+                ).getName()
+        )) {
+
+            return false;
+        }
+
+
+        return deleteFileQuietly(
+                new File(
+                        getImageDirectory(
+                                context
+                        ),
+                        fileName
+                )
+        );
+    }
+
+
+    public static boolean deleteStoredImageForEntry(
+            Context context,
+            JSONObject entry
+    ) {
+
+        if (entry == null) {
+            return false;
+        }
+
+
+        return deleteStoredImageFile(
+                context,
+                entry.optString(
+                        "imageFileName",
+                        ""
+                )
+        );
+    }
+
+
+    private static boolean deleteFileQuietly(
+            File file
+    ) {
+
+        try {
+
+            return file != null
+                    && (!file.exists()
+                    || file.delete());
+
+
+        } catch (Exception ignored) {
+
+            return false;
+        }
+    }
+
+
+    private static final class StoredImage {
+
+        final String fileName;
+        final String mimeType;
+        final int width;
+        final int height;
+        final long sizeBytes;
+        final long capturedAt;
+
+
+        StoredImage(
+                String fileName,
+                String mimeType,
+                int width,
+                int height,
+                long sizeBytes,
+                long capturedAt
+        ) {
+
+            this.fileName = fileName;
+            this.mimeType = mimeType;
+            this.width = width;
+            this.height = height;
+            this.sizeBytes = sizeBytes;
+            this.capturedAt = capturedAt;
+        }
+
+
+        static StoredImage fromJson(
+                JSONObject object
+        ) {
+
+            if (object == null) {
+                return null;
+            }
+
+
+            String fileName =
+                    object.optString(
+                            "imageFileName",
+                            ""
+                    );
+
+
+            if (fileName.isEmpty()) {
+                return null;
+            }
+
+
+            return new StoredImage(
+                    fileName,
+                    object.optString(
+                            "imageMimeType",
+                            "image/jpeg"
+                    ),
+                    object.optInt(
+                            "imageWidth",
+                            0
+                    ),
+                    object.optInt(
+                            "imageHeight",
+                            0
+                    ),
+                    object.optLong(
+                            "imageSizeBytes",
+                            0
+                    ),
+                    object.optLong(
+                            "imageCapturedAt",
+                            0
+                    )
+            );
+        }
+    }
+
+
+    // =============================================================
     // EXTRA_TEXT_LINES
     // =============================================================
 
@@ -536,6 +2178,14 @@ public class PixelHouseNotificationService
 
 
                 if (saved) {
+
+                    attachPendingImageToHistoryEntry(
+                            packageName,
+                            fingerprint,
+                            title,
+                            text,
+                            timestamp
+                    );
 
                     saveLastNotification(
                             packageName,
@@ -933,6 +2583,15 @@ public class PixelHouseNotificationService
                         );
 
 
+                attachPendingImageToHistoryEntry(
+                        packageName,
+                        fingerprint,
+                        sender,
+                        text,
+                        messageTimestamp
+                );
+
+
                 if (saved) {
 
                     saveLastNotification(
@@ -1298,6 +2957,11 @@ public class PixelHouseNotificationService
                 timestamp
         );
 
+        entry.put(
+                "hasImage",
+                false
+        );
+
 
         return entry;
     }
@@ -1520,6 +3184,19 @@ public class PixelHouseNotificationService
 
 
         for (
+                int i = 0;
+                i < startIndex;
+                i++
+        ) {
+
+            deleteStoredImageForEntry(
+                    this,
+                    oldHistory.optJSONObject(i)
+            );
+        }
+
+
+        for (
                 int i = startIndex;
                 i < oldHistory.length();
                 i++
@@ -1684,7 +3361,7 @@ public class PixelHouseNotificationService
 
             report.append(
                     "PLUGIN VERSION:\n"
-                            + "0.3.0-diagnostic.2"
+                            + "0.3.0-image-test.1"
                             + "\n\n"
             );
 
@@ -1922,7 +3599,9 @@ public class PixelHouseNotificationService
 
             appendMessagingStyleDebug(
                     report,
+                    sbn,
                     extras,
+                    packageName,
                     Notification.EXTRA_MESSAGES,
                     "EXTRA_MESSAGES"
             );
@@ -1930,7 +3609,9 @@ public class PixelHouseNotificationService
 
             appendMessagingStyleDebug(
                     report,
+                    sbn,
                     extras,
+                    packageName,
                     Notification.EXTRA_HISTORIC_MESSAGES,
                     "EXTRA_HISTORIC_MESSAGES"
             );
@@ -2029,7 +3710,7 @@ public class PixelHouseNotificationService
             }
 
 
-            return "WhatsApp child notification: ignored by history, but included in this image diagnostic.";
+            return "WhatsApp child notification: ignored for text history; MessagingStyle images are copied and attached separately.";
         }
 
 
@@ -2525,7 +4206,9 @@ public class PixelHouseNotificationService
 
     private void appendMessagingStyleDebug(
             StringBuilder report,
+            StatusBarNotification sbn,
             Bundle extras,
+            String packageName,
             String extraKey,
             String name
     ) {
@@ -2664,6 +4347,83 @@ public class PixelHouseNotificationService
                                 "Data URI access test: "
                                         + describeUriAccess(
                                         dataUri
+                                )
+                                        + "\n"
+                        );
+                    }
+
+
+                    if (isImageMimeType(
+                            dataMimeType
+                    )) {
+
+                        String imageSender =
+                                getMessageSender(
+                                        message
+                                );
+
+
+                        if (imageSender.isEmpty()) {
+
+                            imageSender =
+                                    getConversationTitle(
+                                            extras
+                                    );
+                        }
+
+
+                        long imageTimestamp =
+                                message.getTimestamp();
+
+
+                        if (imageTimestamp <= 0) {
+                            imageTimestamp = sbn.getPostTime();
+                        }
+
+
+                        String storedFileName =
+                                createImageFileName(
+                                        packageName,
+                                        imageSender,
+                                        safeCharSequence(
+                                                message.getText()
+                                        ).trim(),
+                                        imageTimestamp
+                                );
+
+
+                        File storedFile =
+                                new File(
+                                        getImageDirectory(
+                                                this
+                                        ),
+                                        storedFileName
+                                );
+
+
+                        StoredImage storedInfo =
+                                storedFile.isFile()
+                                        && storedFile.length() > 0
+                                        ? readStoredImageInfo(
+                                        storedFile,
+                                        storedFileName
+                                )
+                                        : null;
+
+
+                        report.append(
+                                "Persistent image copy: "
+                                        + (
+                                        storedInfo == null
+                                                ? "<not saved>"
+                                                : "saved=true file="
+                                                + storedInfo.fileName
+                                                + " width="
+                                                + storedInfo.width
+                                                + " height="
+                                                + storedInfo.height
+                                                + " bytes="
+                                                + storedInfo.sizeBytes
                                 )
                                         + "\n"
                         );

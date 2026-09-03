@@ -8,6 +8,7 @@ import android.content.Intent;
 import android.content.SharedPreferences;
 import android.provider.Settings;
 import android.text.TextUtils;
+import android.util.Base64;
 
 import org.apache.cordova.CallbackContext;
 import org.apache.cordova.CordovaPlugin;
@@ -16,6 +17,9 @@ import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
+import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.FileInputStream;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
@@ -262,6 +266,80 @@ public class PixelHouseNotificationListener extends CordovaPlugin {
                 return true;
 
 
+            case "getNotificationHasImage":
+
+                callbackContext.success(
+                        getNotificationHasImage(
+                                "",
+                                args.optInt(0, 0)
+                        )
+                                ? 1
+                                : 0
+                );
+
+                return true;
+
+
+            case "getNotificationImageMimeType":
+
+                callbackContext.success(
+                        getNotificationImageMimeType(
+                                "",
+                                args.optInt(0, 0)
+                        )
+                );
+
+                return true;
+
+
+            case "getNotificationImageWidth":
+
+                callbackContext.success(
+                        getNotificationImageDimension(
+                                "",
+                                args.optInt(0, 0),
+                                "imageWidth"
+                        )
+                );
+
+                return true;
+
+
+            case "getNotificationImageHeight":
+
+                callbackContext.success(
+                        getNotificationImageDimension(
+                                "",
+                                args.optInt(0, 0),
+                                "imageHeight"
+                        )
+                );
+
+                return true;
+
+
+            case "getNotificationImageDataUrl":
+
+                getNotificationImageDataUrl(
+                        "",
+                        args.optInt(0, 0),
+                        callbackContext
+                );
+
+                return true;
+
+
+            case "getNotificationImageDataUrlById":
+
+                getNotificationImageDataUrlById(
+                        args.optString(0, ""),
+                        args.optString(1, ""),
+                        callbackContext
+                );
+
+                return true;
+
+
             // =====================================================
             // Complete history JSON
             // =====================================================
@@ -389,6 +467,69 @@ public class PixelHouseNotificationListener extends CordovaPlugin {
                                 args.optString(0, ""),
                                 args.optInt(1, 0)
                         )
+                );
+
+                return true;
+
+
+            case "getNotificationHasImageForPackage":
+
+                callbackContext.success(
+                        getNotificationHasImage(
+                                args.optString(0, ""),
+                                args.optInt(1, 0)
+                        )
+                                ? 1
+                                : 0
+                );
+
+                return true;
+
+
+            case "getNotificationImageMimeTypeForPackage":
+
+                callbackContext.success(
+                        getNotificationImageMimeType(
+                                args.optString(0, ""),
+                                args.optInt(1, 0)
+                        )
+                );
+
+                return true;
+
+
+            case "getNotificationImageWidthForPackage":
+
+                callbackContext.success(
+                        getNotificationImageDimension(
+                                args.optString(0, ""),
+                                args.optInt(1, 0),
+                                "imageWidth"
+                        )
+                );
+
+                return true;
+
+
+            case "getNotificationImageHeightForPackage":
+
+                callbackContext.success(
+                        getNotificationImageDimension(
+                                args.optString(0, ""),
+                                args.optInt(1, 0),
+                                "imageHeight"
+                        )
+                );
+
+                return true;
+
+
+            case "getNotificationImageDataUrlForPackage":
+
+                getNotificationImageDataUrl(
+                        args.optString(0, ""),
+                        args.optInt(1, 0),
+                        callbackContext
                 );
 
                 return true;
@@ -1208,6 +1349,345 @@ public class PixelHouseNotificationListener extends CordovaPlugin {
 
 
     // =============================================================
+    // Notification image metadata and data
+    // =============================================================
+
+    private boolean getNotificationHasImage(
+            String packageName,
+            int index
+    ) {
+
+        JSONObject notification =
+                getNotificationObject(
+                        packageName,
+                        index
+                );
+
+
+        return getNotificationImageFile(
+                notification
+        ) != null;
+    }
+
+
+    private String getNotificationImageMimeType(
+            String packageName,
+            int index
+    ) {
+
+        JSONObject notification =
+                getNotificationObject(
+                        packageName,
+                        index
+                );
+
+
+        if (getNotificationImageFile(
+                notification
+        ) == null) {
+
+            return "";
+        }
+
+
+        return notification.optString(
+                "imageMimeType",
+                "image/jpeg"
+        );
+    }
+
+
+    private int getNotificationImageDimension(
+            String packageName,
+            int index,
+            String fieldName
+    ) {
+
+        JSONObject notification =
+                getNotificationObject(
+                        packageName,
+                        index
+                );
+
+
+        if (getNotificationImageFile(
+                notification
+        ) == null) {
+
+            return 0;
+        }
+
+
+        return Math.max(
+                0,
+                notification.optInt(
+                        fieldName,
+                        0
+                )
+        );
+    }
+
+
+    private void getNotificationImageDataUrl(
+            final String packageName,
+            final int index,
+            final CallbackContext callbackContext
+    ) {
+
+        cordova.getThreadPool().execute(
+                new Runnable() {
+
+                    @Override
+                    public void run() {
+
+                        try {
+
+                            JSONObject notification =
+                                    getNotificationObject(
+                                            packageName,
+                                            index
+                                    );
+
+
+                            callbackContext.success(
+                                    createNotificationImageDataUrl(
+                                            notification
+                                    )
+                            );
+
+
+                        } catch (Exception e) {
+
+                            callbackContext.error(
+                                    "Could not read stored notification image: "
+                                            + e.getMessage()
+                            );
+                        }
+                    }
+                }
+        );
+    }
+
+
+    private void getNotificationImageDataUrlById(
+            final String packageName,
+            final String notificationId,
+            final CallbackContext callbackContext
+    ) {
+
+        cordova.getThreadPool().execute(
+                new Runnable() {
+
+                    @Override
+                    public void run() {
+
+                        try {
+
+                            JSONObject notification =
+                                    getNotificationObjectById(
+                                            packageName,
+                                            notificationId
+                                    );
+
+
+                            callbackContext.success(
+                                    createNotificationImageDataUrl(
+                                            notification
+                                    )
+                            );
+
+
+                        } catch (Exception e) {
+
+                            callbackContext.error(
+                                    "Could not read stored notification image: "
+                                            + e.getMessage()
+                            );
+                        }
+                    }
+                }
+        );
+    }
+
+
+    private JSONObject getNotificationObjectById(
+            String packageName,
+            String notificationId
+    ) {
+
+        if (notificationId == null
+                || notificationId.isEmpty()) {
+
+            return null;
+        }
+
+
+        JSONArray history =
+                getNotificationHistory(
+                        packageName
+                );
+
+
+        for (
+                int i = history.length() - 1;
+                i >= 0;
+                i--
+        ) {
+
+            JSONObject notification =
+                    history.optJSONObject(i);
+
+
+            if (notification != null
+                    && notificationId.equals(
+                    notification.optString(
+                            "id",
+                            ""
+                    )
+            )) {
+
+                return notification;
+            }
+        }
+
+
+        return null;
+    }
+
+
+    private String createNotificationImageDataUrl(
+            JSONObject notification
+    ) throws Exception {
+
+        File imageFile =
+                getNotificationImageFile(
+                        notification
+                );
+
+
+        if (imageFile == null) {
+
+            throw new Exception(
+                    "This history item has no stored image."
+            );
+        }
+
+
+        if (imageFile.length()
+                > 12L * 1024L * 1024L) {
+
+            throw new Exception(
+                    "The stored notification image is too large."
+            );
+        }
+
+
+        byte[] buffer =
+                new byte[16384];
+
+
+        ByteArrayOutputStream output =
+                new ByteArrayOutputStream(
+                        (int) Math.min(
+                                imageFile.length(),
+                                Integer.MAX_VALUE
+                        )
+                );
+
+
+        try (
+                FileInputStream input =
+                        new FileInputStream(
+                                imageFile
+                        )
+        ) {
+
+            int bytesRead;
+
+
+            while ((bytesRead = input.read(
+                    buffer
+            )) != -1) {
+
+                output.write(
+                        buffer,
+                        0,
+                        bytesRead
+                );
+            }
+        }
+
+
+        String mimeType =
+                notification.optString(
+                        "imageMimeType",
+                        "image/jpeg"
+                );
+
+
+        String encoded =
+                Base64.encodeToString(
+                        output.toByteArray(),
+                        Base64.NO_WRAP
+                );
+
+
+        return "data:"
+                + mimeType
+                + ";base64,"
+                + encoded;
+    }
+
+
+    private File getNotificationImageFile(
+            JSONObject notification
+    ) {
+
+        if (notification == null) {
+            return null;
+        }
+
+
+        String fileName =
+                notification.optString(
+                        "imageFileName",
+                        ""
+                );
+
+
+        if (fileName.isEmpty()
+                || !fileName.equals(
+                new File(
+                        fileName
+                ).getName()
+        )) {
+
+            return null;
+        }
+
+
+        File imageFile =
+                new File(
+                        PixelHouseNotificationService
+                                .getImageDirectory(
+                                        cordova.getActivity()
+                                ),
+                        fileName
+                );
+
+
+        if (!imageFile.isFile()
+                || imageFile.length() <= 0) {
+
+            return null;
+        }
+
+
+        return imageFile;
+    }
+
+
+    // =============================================================
     // Delete one history item by public index
     // =============================================================
 
@@ -1348,6 +1828,12 @@ public class PixelHouseNotificationListener extends CordovaPlugin {
                 return;
             }
 
+
+            JSONObject deletedEntry =
+                    history.optJSONObject(
+                            storedIndex
+                    );
+
             JSONArray updatedHistory =
                     new JSONArray();
 
@@ -1376,6 +1862,13 @@ public class PixelHouseNotificationListener extends CordovaPlugin {
                             updatedHistory.toString()
                     )
                     .apply();
+
+
+            PixelHouseNotificationService
+                    .deleteStoredImageForEntry(
+                            cordova.getActivity(),
+                            deletedEntry
+                    );
 
             updateLastNotificationFromAllHistories();
 
@@ -1526,13 +2019,22 @@ public class PixelHouseNotificationListener extends CordovaPlugin {
         SharedPreferences.Editor editor =
                 prefs.edit();
 
+
+        deleteAllStoredNotificationImages();
+
         for (String key : prefs.getAll().keySet()) {
 
             if (key != null
-                    && key.startsWith(
+                    && (
+                    key.startsWith(
                             PixelHouseNotificationService
                                     .KEY_NOTIFICATION_HISTORY_PREFIX
-                    )) {
+                    )
+                            || key.startsWith(
+                            PixelHouseNotificationService
+                                    .KEY_PENDING_NOTIFICATION_IMAGES_PREFIX
+                    )
+            )) {
 
                 editor.remove(key);
             }
@@ -1579,10 +2081,50 @@ public class PixelHouseNotificationListener extends CordovaPlugin {
                         prefs
                 );
 
+
+        JSONArray historyToClear =
+                getNotificationHistory(
+                        normalizedPackage
+                );
+
+
+        deleteImagesFromJsonArray(
+                historyToClear
+        );
+
+
+        try {
+
+            JSONArray pendingImages =
+                    new JSONArray(
+                            prefs.getString(
+                                    PixelHouseNotificationService
+                                            .getPendingImagesPreferenceKey(
+                                                    normalizedPackage
+                                            ),
+                                    "[]"
+                            )
+                    );
+
+
+            deleteImagesFromJsonArray(
+                    pendingImages
+            );
+
+
+        } catch (Exception ignored) {
+        }
+
         prefs.edit()
                 .remove(
                         PixelHouseNotificationService
                                 .getHistoryPreferenceKey(
+                                            normalizedPackage
+                                )
+                )
+                .remove(
+                        PixelHouseNotificationService
+                                .getPendingImagesPreferenceKey(
                                         normalizedPackage
                                 )
                 )
@@ -1591,6 +2133,65 @@ public class PixelHouseNotificationListener extends CordovaPlugin {
         updateLastNotificationFromAllHistories();
 
         callbackContext.success();
+    }
+
+
+    private void deleteImagesFromJsonArray(
+            JSONArray items
+    ) {
+
+        if (items == null) {
+            return;
+        }
+
+
+        for (
+                int i = 0;
+                i < items.length();
+                i++
+        ) {
+
+            PixelHouseNotificationService
+                    .deleteStoredImageForEntry(
+                            cordova.getActivity(),
+                            items.optJSONObject(i)
+                    );
+        }
+    }
+
+
+    private void deleteAllStoredNotificationImages() {
+
+        try {
+
+            File imageDirectory =
+                    PixelHouseNotificationService
+                            .getImageDirectory(
+                                    cordova.getActivity()
+                            );
+
+
+            File[] files =
+                    imageDirectory.listFiles();
+
+
+            if (files == null) {
+                return;
+            }
+
+
+            for (File file : files) {
+
+                if (file != null
+                        && file.isFile()) {
+
+                    file.delete();
+                }
+            }
+
+
+        } catch (Exception ignored) {
+        }
     }
 
 

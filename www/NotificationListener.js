@@ -237,6 +237,62 @@ var NotificationListener = {
         );
     },
 
+    getNotificationHasImage: function (
+        index,
+        success,
+        error
+    ) {
+        exec(success, error, 'PixelHouseNotificationListener',
+            'getNotificationHasImage', [index]);
+    },
+
+    getNotificationImageMimeType: function (
+        index,
+        success,
+        error
+    ) {
+        exec(success, error, 'PixelHouseNotificationListener',
+            'getNotificationImageMimeType', [index]);
+    },
+
+    getNotificationImageWidth: function (
+        index,
+        success,
+        error
+    ) {
+        exec(success, error, 'PixelHouseNotificationListener',
+            'getNotificationImageWidth', [index]);
+    },
+
+    getNotificationImageHeight: function (
+        index,
+        success,
+        error
+    ) {
+        exec(success, error, 'PixelHouseNotificationListener',
+            'getNotificationImageHeight', [index]);
+    },
+
+    getNotificationImageDataUrl: function (
+        index,
+        success,
+        error
+    ) {
+        exec(success, error, 'PixelHouseNotificationListener',
+            'getNotificationImageDataUrl', [index]);
+    },
+
+    getNotificationImageDataUrlById: function (
+        packageName,
+        notificationId,
+        success,
+        error
+    ) {
+        exec(success, error, 'PixelHouseNotificationListener',
+            'getNotificationImageDataUrlById',
+            [packageName, notificationId]);
+    },
+
 
     // =========================================================
     // Complete notification history as JSON
@@ -348,6 +404,41 @@ var NotificationListener = {
     ) {
         exec(success, error, 'PixelHouseNotificationListener',
             'getNotificationIdForPackage', [packageName, index]);
+    },
+
+    getNotificationHasImageForPackage: function (
+        packageName, index, success, error
+    ) {
+        exec(success, error, 'PixelHouseNotificationListener',
+            'getNotificationHasImageForPackage', [packageName, index]);
+    },
+
+    getNotificationImageMimeTypeForPackage: function (
+        packageName, index, success, error
+    ) {
+        exec(success, error, 'PixelHouseNotificationListener',
+            'getNotificationImageMimeTypeForPackage', [packageName, index]);
+    },
+
+    getNotificationImageWidthForPackage: function (
+        packageName, index, success, error
+    ) {
+        exec(success, error, 'PixelHouseNotificationListener',
+            'getNotificationImageWidthForPackage', [packageName, index]);
+    },
+
+    getNotificationImageHeightForPackage: function (
+        packageName, index, success, error
+    ) {
+        exec(success, error, 'PixelHouseNotificationListener',
+            'getNotificationImageHeightForPackage', [packageName, index]);
+    },
+
+    getNotificationImageDataUrlForPackage: function (
+        packageName, index, success, error
+    ) {
+        exec(success, error, 'PixelHouseNotificationListener',
+            'getNotificationImageDataUrlForPackage', [packageName, index]);
     },
 
     deleteNotificationByIndexForPackage: function (
